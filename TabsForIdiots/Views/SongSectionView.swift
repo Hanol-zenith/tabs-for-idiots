@@ -3,6 +3,7 @@ import SwiftUI
 struct SongSectionView: View {
     let section: SongSection
     let song: Song
+    let displayMode: DisplayMode
     let currentMeasureId: UUID?
     let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
@@ -16,9 +17,17 @@ struct SongSectionView: View {
                 .foregroundStyle(isCurrent ? .blue : .primary)
                 .padding(.bottom, 2)
 
+            if displayMode == .chordsAndPicking && song.strummingPatterns.isEmpty {
+                Text("No fingerpicking data for this song")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
+
             MeasureFlowView(
                 measures: section.measures,
                 song: song,
+                displayMode: displayMode,
                 currentMeasureId: currentMeasureId,
                 matchState: matchState,
                 onJumpTo: onJumpTo
@@ -39,6 +48,7 @@ struct SongSectionView: View {
 struct MeasureFlowView: View {
     let measures: [SongMeasure]
     let song: Song
+    let displayMode: DisplayMode
     let currentMeasureId: UUID?
     let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
@@ -52,6 +62,7 @@ struct MeasureFlowView: View {
                 MeasureLineView(
                     measures: line,
                     song: song,
+                    displayMode: displayMode,
                     currentMeasureId: currentMeasureId,
                     matchState: matchState,
                     onJumpTo: onJumpTo
@@ -64,6 +75,7 @@ struct MeasureFlowView: View {
 struct MeasureLineView: View {
     let measures: [SongMeasure]
     let song: Song
+    let displayMode: DisplayMode
     let currentMeasureId: UUID?
     let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
@@ -74,6 +86,7 @@ struct MeasureLineView: View {
                 MeasureCell(
                     measure: measure,
                     song: song,
+                    displayMode: displayMode,
                     isCurrent: measure.id == currentMeasureId,
                     matchState: matchState,
                     onJumpTo: onJumpTo
@@ -86,6 +99,7 @@ struct MeasureLineView: View {
 struct MeasureCell: View {
     let measure: SongMeasure
     let song: Song
+    let displayMode: DisplayMode
     let isCurrent: Bool
     let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
@@ -97,13 +111,18 @@ struct MeasureCell: View {
         return song.chords.first(where: { $0.id == id })?.name ?? ""
     }
 
+    private var strummingPattern: StrummingPattern? {
+        guard displayMode != .chordsOnly,
+              let id = measure.strummingPatternId else { return nil }
+        return song.strummingPatterns.first(where: { $0.id == id })
+    }
+
     private var highlightColor: Color {
         guard isCurrent else { return .clear }
         switch matchState {
-        case .correct:  return .green.opacity(0.18)
-        case .wrong:    return .red.opacity(0.15)
-        case .waiting:  return .blue.opacity(0.08)
-        case .none:     return .clear
+        case .correct:          return .green.opacity(0.18)
+        case .wrong:            return .red.opacity(0.15)
+        case .waiting, .none:   return .blue.opacity(0.08)
         }
     }
 
@@ -111,32 +130,46 @@ struct MeasureCell: View {
         if isLongPressing { return .orange }
         guard isCurrent else { return .clear }
         switch matchState {
-        case .correct:  return .green
-        case .wrong:    return .red
-        case .waiting:  return .blue.opacity(0.5)
-        case .none:     return .clear
+        case .correct:          return .green
+        case .wrong:            return .red
+        case .waiting:          return .blue.opacity(0.5)
+        case .none:             return .clear
         }
     }
 
     private var chordColor: Color {
         guard isCurrent else { return .blue }
         switch matchState {
-        case .correct:  return .green
-        case .wrong:    return .red
-        case .waiting, .none: return .blue
+        case .correct:          return .green
+        case .wrong:            return .red
+        case .waiting, .none:   return .blue
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            // Chord name
             Text(chordName.isEmpty ? " " : chordName)
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(chordColor)
                 .frame(minWidth: 72, alignment: .leading)
 
+            // Lyric
             Text(measure.lyric.isEmpty ? " " : measure.lyric)
                 .font(.system(size: 15))
                 .frame(minWidth: 72, alignment: .leading)
+
+            // Strumming / picking arrows (only when mode is active)
+            if let pattern = strummingPattern {
+                HStack(spacing: 1) {
+                    ForEach(Array(pattern.strokes.enumerated()), id: \.offset) { _, stroke in
+                        Text(stroke.symbol)
+                            .font(.system(size: 10))
+                            .foregroundStyle(stroke.isDown ? Color.primary.opacity(0.7) : Color.blue.opacity(0.8))
+                    }
+                }
+                .padding(.top, 1)
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)

@@ -2,22 +2,30 @@ import SwiftUI
 import AVFoundation
 
 enum ChordMatchState {
-    case none
-    case waiting
-    case correct
-    case wrong
+    case none, waiting, correct, wrong
+}
+
+enum DisplayMode: String, CaseIterable {
+    case chordsOnly         = "Chords"
+    case chordsAndStrumming = "+ Strum"
+    case chordsAndPicking   = "+ Picking"
 }
 
 struct SongDetailView: View {
     let song: Song
     @StateObject private var listeningEngine = ListeningEngine()
     @State private var listeningEnabled = false
+    @State private var displayMode: DisplayMode = .chordsOnly
     @State private var currentMeasureIndex = 0
     @State private var micPermissionDenied = false
     @State private var showListeningToast = false
-    // Prevents the lingering sound of a chord from auto-advancing to the next measure.
-    // Only resets when stableChord goes nil (silence), not when the measure index changes.
-    @State private var lastAdvancedForChord: String? = nil
+
+    // Time-based cooldown prevents the same chord from immediately re-advancing
+    // after we just advanced with it (replaces the silence-gap approach).
+    @State private var lastChordThatAdvanced: String? = nil
+    @State private var advanceCooldownUntil: Date = .distantPast
+    // Cancellable task that fires after the green-display window expires
+    @State private var advanceTask: Task<Void, Never>? = nil
 
     private var allMeasures: [(sectionIndex: Int, measure: SongMeasure)] {
         song.sections.enumerated().flatMap { si, section in
@@ -55,6 +63,19 @@ struct SongDetailView: View {
 
                 Divider()
 
+                // Mode picker
+                Picker("Mode", selection: $displayMode) {
+                    ForEach(DisplayMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color(.secondarySystemBackground))
+
+                Divider()
+
                 ScrollView {
                     ScrollViewReader { proxy in
                         LazyVStack(alignment: .leading, spacing: 24) {
@@ -62,6 +83,7 @@ struct SongDetailView: View {
                                 SongSectionView(
                                     section: section,
                                     song: song,
+                                    displayMode: displayMode,
                                     currentMeasureId: currentSectionIndex == sIndex ? currentMeasure?.id : nil,
                                     matchState: currentSectionIndex == sIndex ? matchState : .none,
                                     onJumpTo: listeningEnabled ? jumpToMeasure : nil
@@ -120,30 +142,55 @@ struct SongDetailView: View {
             Text("Enable microphone access in Settings to use chord detection.")
         }
         .onReceive(listeningEngine.$stableChord) { chord in
-            guard listeningEnabled else { return }
-            // Silence clears the restrum guard so the same chord can advance again
-            guard let chord else {
-                lastAdvancedForChord = nil
-                return
-            }
-            // Require a silence gap before the same chord can advance again
-            guard chord != lastAdvancedForChord else { return }
-            guard chord == expectedChordName else { return }
-            lastAdvancedForChord = chord
+            handleStableChord(chord)
+        }
+        .onChange(of: listeningEnabled) { _, enabled in
+            if !enabled { cancelAdvance() }
+        }
+        .onDisappear {
+            listeningEngine.stop()
+            cancelAdvance()
+        }
+    }
+
+    // MARK: - Advance logic
+
+    private func handleStableChord(_ chord: String?) {
+        // Always cancel a pending advance when the detection changes
+        cancelAdvance()
+        guard listeningEnabled, let chord else { return }
+
+        // Time-based cooldown: same chord can't re-trigger for 0.6s after it just caused an advance
+        if chord == lastChordThatAdvanced && Date() < advanceCooldownUntil { return }
+
+        // Wrong chord — nothing to schedule
+        guard chord == expectedChordName else { return }
+
+        // Correct chord — show green for 0.8s then advance
+        let capturedChord = chord
+        advanceTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 800_000_000) } catch { return }
+            lastChordThatAdvanced = capturedChord
+            advanceCooldownUntil = Date().addingTimeInterval(0.6)
+            advanceTask = nil
             let next = currentMeasureIndex + 1
             if next < allMeasures.count {
                 currentMeasureIndex = next
             }
         }
-        .onDisappear {
-            listeningEngine.stop()
-        }
+    }
+
+    private func cancelAdvance() {
+        advanceTask?.cancel()
+        advanceTask = nil
     }
 
     private func jumpToMeasure(id: UUID) {
+        cancelAdvance()
         guard let idx = allMeasures.firstIndex(where: { $0.measure.id == id }) else { return }
         currentMeasureIndex = idx
-        lastAdvancedForChord = nil
+        lastChordThatAdvanced = nil
+        advanceCooldownUntil = .distantPast
     }
 
     private func toggleListening() {
@@ -158,7 +205,8 @@ struct SongDetailView: View {
                         listeningEngine.start()
                         listeningEnabled = true
                         currentMeasureIndex = 0
-                        lastAdvancedForChord = nil
+                        lastChordThatAdvanced = nil
+                        advanceCooldownUntil = .distantPast
                         showToast()
                     } else {
                         micPermissionDenied = true
@@ -230,9 +278,9 @@ struct ChordPanel: View {
     let nameColor: Color
     let borderColor: Color
 
-    // Canvas height: 4 frets * 14 + 30 = 86; no name shown inside (showName: false)
+    // Fixed canvas dimensions for ukulele (guitar would be wider but same height)
     private let diagramH: CGFloat = 86
-    private let diagramW: CGFloat = 62  // (4-1)*14+20 for ukulele
+    private let diagramW: CGFloat = 62
 
     var body: some View {
         VStack(spacing: 6) {
@@ -240,21 +288,24 @@ struct ChordPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            // Fixed-size container so the panel never resizes
             ZStack {
                 if let chord = chordDef {
                     ChordDiagramView(chord: chord, stringCount: stringCount, showName: false)
                 } else {
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(Color(.separator), lineWidth: 0.5)
-                        .frame(width: diagramW, height: diagramH)
                 }
             }
             .frame(width: diagramW, height: diagramH)
+            // Slide-up exit / slide-in-from-below entry when chord changes
+            .animation(.easeInOut(duration: 0.3), value: chordName)
 
             Text(chordName)
                 .font(.title3.bold())
                 .foregroundStyle(nameColor)
                 .frame(height: 22)
+                .animation(.easeInOut(duration: 0.2), value: nameColor.description)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
