@@ -13,19 +13,29 @@ enum DisplayMode: String, CaseIterable {
 
 struct SongDetailView: View {
     let song: Song
-    @StateObject private var listeningEngine = ListeningEngine()
+
+    @StateObject private var listeningEngine: ListeningEngine
+    @StateObject private var tempoEngine: TempoEngine
+
     @State private var listeningEnabled = false
     @State private var displayMode: DisplayMode = .chordsOnly
     @State private var currentMeasureIndex = 0
     @State private var micPermissionDenied = false
     @State private var showListeningToast = false
-
-    // Time-based cooldown prevents the same chord from immediately re-advancing
-    // after we just advanced with it (replaces the silence-gap approach).
     @State private var lastChordThatAdvanced: String? = nil
     @State private var advanceCooldownUntil: Date = .distantPast
-    // Cancellable task that fires after the green-display window expires
     @State private var advanceTask: Task<Void, Never>? = nil
+    @State private var tempoEnabled = true
+    @State private var userTempo: Int
+
+    init(song: Song) {
+        self.song = song
+        _listeningEngine = StateObject(wrappedValue: ListeningEngine())
+        _tempoEngine = StateObject(wrappedValue: TempoEngine())
+        _userTempo = State(initialValue: song.tempo)
+    }
+
+    // MARK: - Computed helpers
 
     private var allMeasures: [(sectionIndex: Int, measure: SongMeasure)] {
         song.sections.enumerated().flatMap { si, section in
@@ -54,6 +64,18 @@ struct SongDetailView: View {
         return detected == expectedChordName ? .correct : .wrong
     }
 
+    private var currentStrummingPattern: StrummingPattern? {
+        guard let measure = currentMeasure,
+              let id = measure.strummingPatternId else { return nil }
+        return song.strummingPatterns.first(where: { $0.id == id })
+    }
+
+    private var showBottomPanel: Bool {
+        listeningEnabled || (displayMode != .chordsOnly && tempoEnabled)
+    }
+
+    // MARK: - Body
+
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
@@ -63,16 +85,10 @@ struct SongDetailView: View {
 
                 Divider()
 
-                // Mode picker
-                Picker("Mode", selection: $displayMode) {
-                    ForEach(DisplayMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(Color(.secondarySystemBackground))
+                ModePicker(selection: $displayMode, pickingAvailable: song.hasPickingData)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground))
 
                 Divider()
 
@@ -92,25 +108,20 @@ struct SongDetailView: View {
                             }
                         }
                         .padding()
-                        .onChange(of: currentSectionIndex) { _, newSectionIndex in
+                        .onChange(of: currentSectionIndex) { _, newIdx in
                             let sections = song.sections
-                            if newSectionIndex < sections.count {
+                            if newIdx < sections.count {
                                 withAnimation {
-                                    proxy.scrollTo(sections[newSectionIndex].id, anchor: .top)
+                                    proxy.scrollTo(sections[newIdx].id, anchor: .top)
                                 }
                             }
                         }
                     }
                 }
 
-                if listeningEnabled {
+                if showBottomPanel {
                     Divider()
-                    ListeningFeedbackView(
-                        engine: listeningEngine,
-                        expectedChordName: expectedChordName,
-                        song: song
-                    )
-                    .background(.ultraThinMaterial)
+                    bottomPanel
                 }
             }
 
@@ -144,45 +155,91 @@ struct SongDetailView: View {
         .onReceive(listeningEngine.$stableChord) { chord in
             handleStableChord(chord)
         }
-        .onChange(of: listeningEnabled) { _, enabled in
+        .onChange(of: displayMode)        { _, _ in syncTempo() }
+        .onChange(of: tempoEnabled)       { _, _ in syncTempo() }
+        .onChange(of: userTempo)          { _, _ in syncTempo() }
+        .onChange(of: currentMeasureIndex){ _, _ in syncTempo() }
+        .onChange(of: listeningEnabled)   { _, enabled in
             if !enabled { cancelAdvance() }
         }
         .onDisappear {
             listeningEngine.stop()
+            tempoEngine.stop()
             cancelAdvance()
         }
+    }
+
+    // MARK: - Bottom panel
+
+    @ViewBuilder
+    private var bottomPanel: some View {
+        VStack(spacing: 0) {
+            if listeningEnabled {
+                ChordTeleprompterView(
+                    song: song,
+                    currentMeasureIndex: currentMeasureIndex,
+                    allMeasures: allMeasures,
+                    matchState: matchState,
+                    heardChordName: listeningEngine.stableChord
+                )
+                .padding(.top, 8)
+            }
+
+            if displayMode != .chordsOnly {
+                if listeningEnabled { Divider().padding(.top, 4) }
+
+                if let pattern = currentStrummingPattern {
+                    StrummingMetronomeView(
+                        pattern: pattern,
+                        currentStrokeIndex: tempoEnabled ? tempoEngine.currentStrokeIndex : -1
+                    )
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                } else {
+                    Text("No strumming pattern for this section")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(8)
+                }
+
+                Divider()
+                TempoControlsView(bpm: $userTempo, enabled: $tempoEnabled)
+            }
+        }
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Advance logic
 
     private func handleStableChord(_ chord: String?) {
-        // Always cancel a pending advance when the detection changes
         cancelAdvance()
         guard listeningEnabled, let chord else { return }
-
-        // Time-based cooldown: same chord can't re-trigger for 0.6s after it just caused an advance
         if chord == lastChordThatAdvanced && Date() < advanceCooldownUntil { return }
-
-        // Wrong chord — nothing to schedule
         guard chord == expectedChordName else { return }
 
-        // Correct chord — show green for 0.8s then advance
-        let capturedChord = chord
+        // Brief window to show green, then advance immediately into the slide animation
+        let captured = chord
         advanceTask = Task { @MainActor in
-            do { try await Task.sleep(nanoseconds: 800_000_000) } catch { return }
-            lastChordThatAdvanced = capturedChord
-            advanceCooldownUntil = Date().addingTimeInterval(0.6)
+            do { try await Task.sleep(nanoseconds: 180_000_000) } catch { return }
+            lastChordThatAdvanced = captured
+            advanceCooldownUntil = Date().addingTimeInterval(0.4)
             advanceTask = nil
             let next = currentMeasureIndex + 1
-            if next < allMeasures.count {
-                currentMeasureIndex = next
-            }
+            if next < allMeasures.count { currentMeasureIndex = next }
         }
     }
 
     private func cancelAdvance() {
         advanceTask?.cancel()
         advanceTask = nil
+    }
+
+    private func syncTempo() {
+        if displayMode != .chordsOnly && tempoEnabled, let pattern = currentStrummingPattern {
+            tempoEngine.start(bpm: Double(userTempo), strokeCount: pattern.strokes.count)
+        } else {
+            tempoEngine.stop()
+        }
     }
 
     private func jumpToMeasure(id: UUID) {
@@ -232,88 +289,170 @@ struct SongDetailView: View {
     }
 }
 
-// MARK: - Feedback panel
+// MARK: - Chord teleprompter
 
-struct ListeningFeedbackView: View {
-    @ObservedObject var engine: ListeningEngine
-    let expectedChordName: String?
+struct ChordTeleprompterView: View {
     let song: Song
+    let currentMeasureIndex: Int
+    let allMeasures: [(sectionIndex: Int, measure: SongMeasure)]
+    let matchState: ChordMatchState
+    let heardChordName: String?
 
-    private var isCorrect: Bool {
-        guard let h = engine.stableChord, let e = expectedChordName else { return false }
-        return h == e
+    private func chordInfo(at idx: Int) -> (name: String, def: ChordDefinition?) {
+        guard idx >= 0, idx < allMeasures.count,
+              let id = allMeasures[idx].measure.chordId,
+              let chord = song.chords.first(where: { $0.id == id })
+        else { return ("", nil) }
+        return (chord.name, chord)
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ChordPanel(
-                label: "Hearing",
-                chordName: engine.stableChord ?? "—",
-                chordDef: song.chords.first(where: { $0.name == engine.stableChord }),
-                stringCount: song.instrument.stringCount,
-                nameColor: engine.stableChord == nil ? .secondary : (isCorrect ? .green : .red),
-                borderColor: engine.stableChord == nil ? .clear : (isCorrect ? .green : .red)
-            )
+        let lo = max(0, currentMeasureIndex - 1)
+        let hi = min(allMeasures.count - 1, currentMeasureIndex + 1)
+        let indices = lo <= hi ? Array(lo...hi) : []
 
-            Divider()
+        ZStack {
+            ForEach(indices, id: \.self) { idx in
+                let pos = idx - currentMeasureIndex   // -1, 0, or 1
+                let isCurrent = pos == 0
+                let (name, def) = chordInfo(at: idx)
+                let scale: CGFloat   = isCurrent ? 1.0  : 0.50
+                let opacity: Double  = isCurrent ? 1.0  : (pos < 0 ? 0.15 : 0.40)
+                let yOff: CGFloat    = CGFloat(pos) * 98
 
-            ChordPanel(
-                label: "Playing",
-                chordName: expectedChordName ?? "—",
-                chordDef: song.chords.first(where: { $0.name == expectedChordName }),
-                stringCount: song.instrument.stringCount,
-                nameColor: isCorrect ? .green : .primary,
-                borderColor: isCorrect ? .green : .clear
-            )
+                VStack(spacing: 4) {
+                    if let chord = def {
+                        ChordDiagramView(chord: chord,
+                                         stringCount: song.instrument.stringCount,
+                                         showName: false)
+                    } else {
+                        Color.clear.frame(width: 62, height: 86)
+                    }
+
+                    Text(name.isEmpty ? "—" : name)
+                        .font(isCurrent ? .title2.bold() : .footnote)
+                        .foregroundStyle(
+                            isCurrent && matchState == .correct ? Color.green : (isCurrent ? .primary : .secondary)
+                        )
+
+                    // Hearing badge — only on current chord, only when different from expected
+                    if isCurrent, let heard = heardChordName, heard != name, !name.isEmpty {
+                        Text("Hearing: \(heard)")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .scaleEffect(scale)
+                .opacity(opacity)
+                .offset(y: yOff)
+            }
         }
-        .frame(height: 140)
+        .frame(height: 145)
+        .clipped()
+        .animation(.spring(duration: 0.28, bounce: 0.0), value: currentMeasureIndex)
     }
 }
 
-struct ChordPanel: View {
-    let label: String
-    let chordName: String
-    let chordDef: ChordDefinition?
-    let stringCount: Int
-    let nameColor: Color
-    let borderColor: Color
+// MARK: - Strumming metronome
 
-    // Fixed canvas dimensions for ukulele (guitar would be wider but same height)
-    private let diagramH: CGFloat = 86
-    private let diagramW: CGFloat = 62
+struct StrummingMetronomeView: View {
+    let pattern: StrummingPattern
+    let currentStrokeIndex: Int  // -1 means tempo off
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            ForEach(Array(pattern.strokes.enumerated()), id: \.offset) { idx, stroke in
+                let active = idx == currentStrokeIndex
+                VStack(spacing: 2) {
+                    Text(stroke.symbol)
+                        .font(.system(size: active ? 26 : 20))
+                        .foregroundStyle(active ? Color.orange : (stroke.isDown ? Color.primary : Color.blue))
+                    Text(stroke.rawValue)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(active ? Color.orange : Color.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(active ? Color.orange.opacity(0.2) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .animation(.easeInOut(duration: 0.07), value: currentStrokeIndex)
+            }
+        }
+    }
+}
 
-            // Fixed-size container so the panel never resizes
-            ZStack {
-                if let chord = chordDef {
-                    ChordDiagramView(chord: chord, stringCount: stringCount, showName: false)
-                } else {
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color(.separator), lineWidth: 0.5)
+// MARK: - Tempo controls
+
+struct TempoControlsView: View {
+    @Binding var bpm: Int
+    @Binding var enabled: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "metronome.fill")
+                .foregroundStyle(enabled ? Color.accentColor : .secondary)
+
+            if enabled {
+                Button { bpm = max(40, bpm - 5) } label: {
+                    Image(systemName: "minus.circle.fill").font(.title3)
+                }
+                Text("\(bpm)")
+                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
+                    .frame(width: 44, alignment: .center)
+                Button { bpm = min(240, bpm + 5) } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3)
+                }
+                Text("BPM").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Tempo off").font(.subheadline).foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Toggle("", isOn: $enabled).labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+}
+
+// MARK: - Mode picker (custom, supports disabled state)
+
+struct ModePicker: View {
+    @Binding var selection: DisplayMode
+    let pickingAvailable: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(DisplayMode.allCases.enumerated()), id: \.offset) { i, mode in
+                let disabled = mode == .chordsAndPicking && !pickingAvailable
+                let selected = selection == mode
+
+                Button {
+                    if !disabled { selection = mode }
+                } label: {
+                    Text(mode.rawValue)
+                        .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(selected ? Color.accentColor : Color.clear)
+                        .foregroundStyle(
+                            disabled ? Color.secondary.opacity(0.35) :
+                            selected  ? Color.white : Color.primary
+                        )
+                }
+                .disabled(disabled)
+
+                if i < DisplayMode.allCases.count - 1 {
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(width: 0.5, height: 28)
                 }
             }
-            .frame(width: diagramW, height: diagramH)
-            // Slide-up exit / slide-in-from-below entry when chord changes
-            .animation(.easeInOut(duration: 0.3), value: chordName)
-
-            Text(chordName)
-                .font(.title3.bold())
-                .foregroundStyle(nameColor)
-                .frame(height: 22)
-                .animation(.easeInOut(duration: 0.2), value: nameColor.description)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(borderColor, lineWidth: 2)
-                .padding(4)
-        )
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.separator), lineWidth: 0.5))
     }
 }
 
@@ -321,12 +460,10 @@ struct ChordPanel: View {
 
 struct ToastView: View {
     let message: String
-
     var body: some View {
         Text(message)
             .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 18).padding(.vertical, 10)
             .background(Capsule().fill(.ultraThinMaterial))
             .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
     }

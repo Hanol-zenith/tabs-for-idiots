@@ -32,6 +32,9 @@ final class Song {
         set { sectionsJSON = (try? JSONEncoder().encode(newValue)) ?? Data() }
     }
 
+    // Will be true once fingerpicking notation is stored for this song.
+    var hasPickingData: Bool { false }
+
     init(
         title: String,
         artist: String,
