@@ -23,10 +23,18 @@ struct SongDetailView: View {
     @State private var micPermissionDenied = false
     @State private var showListeningToast = false
     @State private var lastChordThatAdvanced: String? = nil
-    @State private var advanceCooldownUntil: Date = .distantPast
-    @State private var advanceTask: Task<Void, Never>? = nil
+    @State private var lastAdvanceTime: Date = .distantPast
+    // Silence must be detected between same-chord advances so lingering ring
+    // cannot auto-trigger the next repeat of the same chord.
+    @State private var chordWentSilentSinceAdvance = true
+    @State private var cleanupTask: Task<Void, Never>? = nil
     @State private var tempoEnabled = true
     @State private var userTempo: Int
+    // Measure index that was just correctly played; kept green until cleanup fires.
+    @State private var lastCorrectMeasureIndex: Int? = nil
+    // Chord name that was heard when the user last advanced; shown in the hearing
+    // column as the green "exiting" card while the new chord slides into focus.
+    @State private var exitingHeardChordName: String? = nil
 
     init(song: Song) {
         self.song = song
@@ -71,7 +79,7 @@ struct SongDetailView: View {
     }
 
     private var showBottomPanel: Bool {
-        listeningEnabled || (displayMode != .chordsOnly && tempoEnabled)
+        listeningEnabled || displayMode != .chordsOnly
     }
 
     // MARK: - Body
@@ -155,17 +163,17 @@ struct SongDetailView: View {
         .onReceive(listeningEngine.$stableChord) { chord in
             handleStableChord(chord)
         }
-        .onChange(of: displayMode)        { _, _ in syncTempo() }
-        .onChange(of: tempoEnabled)       { _, _ in syncTempo() }
-        .onChange(of: userTempo)          { _, _ in syncTempo() }
-        .onChange(of: currentMeasureIndex){ _, _ in syncTempo() }
-        .onChange(of: listeningEnabled)   { _, enabled in
-            if !enabled { cancelAdvance() }
+        .onChange(of: displayMode)         { _, _ in syncTempo() }
+        .onChange(of: tempoEnabled)        { _, _ in syncTempo() }
+        .onChange(of: userTempo)           { _, _ in syncTempo() }
+        .onChange(of: currentMeasureIndex) { _, _ in syncTempo() }
+        .onChange(of: listeningEnabled) { _, enabled in
+            if !enabled { cancelCleanup() }
         }
         .onDisappear {
             listeningEngine.stop()
             tempoEngine.stop()
-            cancelAdvance()
+            cancelCleanup()
         }
     }
 
@@ -180,9 +188,11 @@ struct SongDetailView: View {
                     currentMeasureIndex: currentMeasureIndex,
                     allMeasures: allMeasures,
                     matchState: matchState,
-                    heardChordName: listeningEngine.stableChord
+                    heardChordName: listeningEngine.stableChord,
+                    lastCorrectMeasureIndex: lastCorrectMeasureIndex,
+                    exitingHeardChordName: exitingHeardChordName
                 )
-                .padding(.top, 8)
+                .padding(.top, 6)
             }
 
             if displayMode != .chordsOnly {
@@ -212,26 +222,52 @@ struct SongDetailView: View {
     // MARK: - Advance logic
 
     private func handleStableChord(_ chord: String?) {
-        cancelAdvance()
-        guard listeningEnabled, let chord else { return }
-        if chord == lastChordThatAdvanced && Date() < advanceCooldownUntil { return }
+        guard listeningEnabled else { return }
+
+        // Silence detected: a future strum of the same chord is now allowed.
+        guard let chord else {
+            chordWentSilentSinceAdvance = true
+            return
+        }
+
+        // Same chord as last advance: block unless the user went silent (re-strummed)
+        // or 2 seconds have elapsed (handles very sustained instruments).
+        if chord == lastChordThatAdvanced {
+            let elapsed = Date().timeIntervalSince(lastAdvanceTime)
+            if !chordWentSilentSinceAdvance && elapsed < 2.0 { return }
+        }
+
         guard chord == expectedChordName else { return }
 
-        // Brief window to show green, then advance immediately into the slide animation
-        let captured = chord
-        advanceTask = Task { @MainActor in
-            do { try await Task.sleep(nanoseconds: 180_000_000) } catch { return }
-            lastChordThatAdvanced = captured
-            advanceCooldownUntil = Date().addingTimeInterval(0.4)
-            advanceTask = nil
-            let next = currentMeasureIndex + 1
-            if next < allMeasures.count { currentMeasureIndex = next }
+        cancelCleanup()
+        chordWentSilentSinceAdvance = false
+        lastChordThatAdvanced = chord
+        lastAdvanceTime = Date()
+
+        let next = currentMeasureIndex + 1
+
+        // Advance immediately — the spring slide IS the "correct" feedback.
+        // The exiting chord stays green and visible above the new chord for 0.8 s.
+        withAnimation(.spring(duration: 0.28, bounce: 0.0)) {
+            lastCorrectMeasureIndex = currentMeasureIndex
+            if next < allMeasures.count {
+                exitingHeardChordName = chord
+                currentMeasureIndex = next
+            }
+        }
+
+        cleanupTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            withAnimation(.easeOut(duration: 0.3)) {
+                lastCorrectMeasureIndex = nil
+                exitingHeardChordName = nil
+            }
         }
     }
 
-    private func cancelAdvance() {
-        advanceTask?.cancel()
-        advanceTask = nil
+    private func cancelCleanup() {
+        cleanupTask?.cancel()
+        cleanupTask = nil
     }
 
     private func syncTempo() {
@@ -243,11 +279,14 @@ struct SongDetailView: View {
     }
 
     private func jumpToMeasure(id: UUID) {
-        cancelAdvance()
+        cancelCleanup()
         guard let idx = allMeasures.firstIndex(where: { $0.measure.id == id }) else { return }
         currentMeasureIndex = idx
         lastChordThatAdvanced = nil
-        advanceCooldownUntil = .distantPast
+        lastAdvanceTime = .distantPast
+        chordWentSilentSinceAdvance = true
+        lastCorrectMeasureIndex = nil
+        exitingHeardChordName = nil
     }
 
     private func toggleListening() {
@@ -263,7 +302,10 @@ struct SongDetailView: View {
                         listeningEnabled = true
                         currentMeasureIndex = 0
                         lastChordThatAdvanced = nil
-                        advanceCooldownUntil = .distantPast
+                        lastAdvanceTime = .distantPast
+                        chordWentSilentSinceAdvance = true
+                        lastCorrectMeasureIndex = nil
+                        exitingHeardChordName = nil
                         showToast()
                     } else {
                         micPermissionDenied = true
@@ -289,7 +331,7 @@ struct SongDetailView: View {
     }
 }
 
-// MARK: - Chord teleprompter
+// MARK: - Chord teleprompter (two-column: Hearing | Playing)
 
 struct ChordTeleprompterView: View {
     let song: Song
@@ -297,8 +339,13 @@ struct ChordTeleprompterView: View {
     let allMeasures: [(sectionIndex: Int, measure: SongMeasure)]
     let matchState: ChordMatchState
     let heardChordName: String?
+    let lastCorrectMeasureIndex: Int?
+    let exitingHeardChordName: String?
 
-    private func chordInfo(at idx: Int) -> (name: String, def: ChordDefinition?) {
+    // Taller panel so the exiting chord is fully visible above the current one.
+    private let cardAreaHeight: CGFloat = 200
+
+    private func expectedInfo(at idx: Int) -> (name: String, def: ChordDefinition?) {
         guard idx >= 0, idx < allMeasures.count,
               let id = allMeasures[idx].measure.chordId,
               let chord = song.chords.first(where: { $0.id == id })
@@ -306,50 +353,172 @@ struct ChordTeleprompterView: View {
         return (chord.name, chord)
     }
 
-    var body: some View {
+    private var heardDef: ChordDefinition? {
+        song.chords.first(where: { $0.name == heardChordName })
+    }
+
+    private var exitingHeardDef: ChordDefinition? {
+        song.chords.first(where: { $0.name == exitingHeardChordName })
+    }
+
+    private var playingIndices: [Int] {
         let lo = max(0, currentMeasureIndex - 1)
         let hi = min(allMeasures.count - 1, currentMeasureIndex + 1)
-        let indices = lo <= hi ? Array(lo...hi) : []
+        guard lo <= hi else { return [] }
+        return Array(lo...hi)
+    }
 
-        ZStack {
-            ForEach(indices, id: \.self) { idx in
-                let pos = idx - currentMeasureIndex   // -1, 0, or 1
-                let isCurrent = pos == 0
-                let (name, def) = chordInfo(at: idx)
-                let scale: CGFloat   = isCurrent ? 1.0  : 0.50
-                let opacity: Double  = isCurrent ? 1.0  : (pos < 0 ? 0.15 : 0.40)
-                let yOff: CGFloat    = CGFloat(pos) * 98
+    // Vertical gap between previous-chord center and current-chord center.
+    private let slotSpacing: CGFloat = 88
 
-                VStack(spacing: 4) {
-                    if let chord = def {
-                        ChordDiagramView(chord: chord,
-                                         stringCount: song.instrument.stringCount,
-                                         showName: false)
-                    } else {
-                        Color.clear.frame(width: 62, height: 86)
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+
+            // ── Hearing ──────────────────────────────────────────────────
+            VStack(spacing: 0) {
+                columnLabel("Hearing")
+
+                ZStack {
+                    // Exiting card: the chord the user just played correctly.
+                    // Slides from y=0 to y=−slotSpacing on insertion (mimics the
+                    // playing column's upward animation), then fades on removal.
+                    if let name = exitingHeardChordName {
+                        ChordCard(
+                            name: name,
+                            def: exitingHeardDef,
+                            stringCount: song.instrument.stringCount,
+                            nameColor: .green,
+                            showListeningIcon: false
+                        )
+                        .scaleEffect(0.70)
+                        .offset(y: -slotSpacing)
+                        .transition(.asymmetric(
+                            insertion: .offset(x: 0, y: slotSpacing).combined(with: .opacity),
+                            removal:   .opacity
+                        ))
+                        .zIndex(0)
                     }
 
-                    Text(name.isEmpty ? "—" : name)
-                        .font(isCurrent ? .title2.bold() : .footnote)
-                        .foregroundStyle(
-                            isCurrent && matchState == .correct ? Color.green : (isCurrent ? .primary : .secondary)
-                        )
+                    // Live hearing card — always shown.
+                    ChordCard(
+                        name: heardChordName ?? "—",
+                        def: heardDef,
+                        stringCount: song.instrument.stringCount,
+                        nameColor: hearingNameColor,
+                        showListeningIcon: heardChordName == nil
+                    )
+                    .zIndex(1)
+                }
+                .frame(height: cardAreaHeight)
+                .clipped()
+            }
+            .frame(maxWidth: .infinity)
 
-                    // Hearing badge — only on current chord, only when different from expected
-                    if isCurrent, let heard = heardChordName, heard != name, !name.isEmpty {
-                        Text("Hearing: \(heard)")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
+            // Separator
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(width: 0.5, height: cardAreaHeight + 22)
+
+            // ── Playing ──────────────────────────────────────────────────
+            VStack(spacing: 0) {
+                columnLabel("Playing")
+
+                ZStack {
+                    ForEach(playingIndices, id: \.self) { idx in
+                        let pos = idx - currentMeasureIndex  // -1, 0, or 1
+                        let isCurrent = pos == 0
+                        // Keep the exiting chord green and clearly visible while
+                        // lastCorrectMeasureIndex is set; fade to dim after cleanup.
+                        let isExiting = idx == lastCorrectMeasureIndex && !isCurrent
+                        let (name, def) = expectedInfo(at: idx)
+
+                        let scale: CGFloat  = isCurrent ? 1.0 : 0.70
+                        let opacity: Double = isCurrent ? 1.0 : (isExiting ? 0.88 : 0.20)
+                        let yOff: CGFloat   = CGFloat(pos) * slotSpacing
+
+                        let nameColor: Color = {
+                            if isCurrent && matchState == .correct { return .green }
+                            if isExiting                           { return .green }
+                            if isCurrent                           { return .primary }
+                            return .secondary
+                        }()
+
+                        ChordCard(
+                            name: name.isEmpty ? "—" : name,
+                            def: def,
+                            stringCount: song.instrument.stringCount,
+                            nameColor: nameColor,
+                            showListeningIcon: false
+                        )
+                        .scaleEffect(scale)
+                        .opacity(opacity)
+                        .offset(y: yOff)
+                        .zIndex(isCurrent ? 1 : 0)
                     }
                 }
-                .scaleEffect(scale)
-                .opacity(opacity)
-                .offset(y: yOff)
+                .frame(height: cardAreaHeight)
+                .clipped()
+                // Animates the slide when currentMeasureIndex changes (chord advance).
+                // Also animates opacity/color when lastCorrectMeasureIndex clears (green fade).
+                .animation(.spring(duration: 0.28, bounce: 0.0), value: currentMeasureIndex)
+                .animation(.easeOut(duration: 0.30),              value: lastCorrectMeasureIndex)
             }
+            .frame(maxWidth: .infinity)
         }
-        .frame(height: 145)
-        .clipped()
-        .animation(.spring(duration: 0.28, bounce: 0.0), value: currentMeasureIndex)
+        .padding(.horizontal, 8)
+    }
+
+    private var hearingNameColor: Color {
+        switch matchState {
+        case .correct: return .green
+        case .wrong:   return heardChordName != nil ? .red : .secondary
+        default:       return heardChordName != nil ? .primary : .secondary
+        }
+    }
+
+    private func columnLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .textCase(.uppercase)
+            .tracking(0.8)
+            .foregroundStyle(.secondary)
+            .frame(height: 22)
+    }
+}
+
+// MARK: - Chord card
+
+struct ChordCard: View {
+    let name: String
+    let def: ChordDefinition?
+    let stringCount: Int
+    let nameColor: Color
+    let showListeningIcon: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let chord = def {
+                ChordDiagramView(chord: chord, stringCount: stringCount, showName: false)
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color(.separator), lineWidth: 1)
+                        .frame(width: 62, height: 86)
+                    if showListeningIcon {
+                        Image(systemName: "waveform")
+                            .foregroundStyle(.secondary.opacity(0.3))
+                            .font(.title2)
+                    } else {
+                        Text("?")
+                            .font(.title3)
+                            .foregroundStyle(.secondary.opacity(0.45))
+                    }
+                }
+            }
+            Text(name)
+                .font(.title3.bold())
+                .foregroundStyle(nameColor)
+        }
     }
 }
 
@@ -357,7 +526,7 @@ struct ChordTeleprompterView: View {
 
 struct StrummingMetronomeView: View {
     let pattern: StrummingPattern
-    let currentStrokeIndex: Int  // -1 means tempo off
+    let currentStrokeIndex: Int  // -1 = tempo off: show pattern without highlighting
 
     var body: some View {
         HStack(spacing: 0) {
