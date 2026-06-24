@@ -3,6 +3,7 @@ import SwiftUI
 struct ChordDiagramView: View {
     let chord: ChordDefinition
     let stringCount: Int
+    var showName: Bool = true
 
     private let fretCount = 4
     private let cellW: CGFloat = 14
@@ -13,8 +14,10 @@ struct ChordDiagramView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text(chord.name)
-                .font(.system(size: 13, weight: .semibold))
+            if showName {
+                Text(chord.name)
+                    .font(.system(size: 13, weight: .semibold))
+            }
 
             Canvas { ctx, size in
                 let originX = (size.width - gridW) / 2

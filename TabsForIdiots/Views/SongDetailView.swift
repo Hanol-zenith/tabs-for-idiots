@@ -2,10 +2,10 @@ import SwiftUI
 import AVFoundation
 
 enum ChordMatchState {
-    case none       // not listening
-    case waiting    // listening, nothing detected yet
-    case correct    // detected == expected
-    case wrong      // detected something but it's wrong
+    case none
+    case waiting
+    case correct
+    case wrong
 }
 
 struct SongDetailView: View {
@@ -15,9 +15,10 @@ struct SongDetailView: View {
     @State private var currentMeasureIndex = 0
     @State private var micPermissionDenied = false
     @State private var showListeningToast = false
+    // Prevents the lingering sound of a chord from auto-advancing to the next measure.
+    // Only resets when stableChord goes nil (silence), not when the measure index changes.
     @State private var lastAdvancedForChord: String? = nil
 
-    // Flat array of all measures across all sections with their section index
     private var allMeasures: [(sectionIndex: Int, measure: SongMeasure)] {
         song.sections.enumerated().flatMap { si, section in
             section.measures.map { (si, $0) }
@@ -41,7 +42,7 @@ struct SongDetailView: View {
 
     private var matchState: ChordMatchState {
         guard listeningEnabled else { return .none }
-        guard let detected = listeningEngine.rawChord else { return .waiting }
+        guard let detected = listeningEngine.stableChord else { return .waiting }
         return detected == expectedChordName ? .correct : .wrong
     }
 
@@ -62,18 +63,18 @@ struct SongDetailView: View {
                                     section: section,
                                     song: song,
                                     currentMeasureId: currentSectionIndex == sIndex ? currentMeasure?.id : nil,
-                                    matchState: currentSectionIndex == sIndex ? matchState : .none
+                                    matchState: currentSectionIndex == sIndex ? matchState : .none,
+                                    onJumpTo: listeningEnabled ? jumpToMeasure : nil
                                 )
                                 .id(section.id)
                             }
                         }
                         .padding()
-                        .onChange(of: currentMeasureIndex) { _, _ in
-                            lastAdvancedForChord = nil
+                        .onChange(of: currentSectionIndex) { _, newSectionIndex in
                             let sections = song.sections
-                            if currentSectionIndex < sections.count {
+                            if newSectionIndex < sections.count {
                                 withAnimation {
-                                    proxy.scrollTo(sections[currentSectionIndex].id, anchor: .top)
+                                    proxy.scrollTo(sections[newSectionIndex].id, anchor: .top)
                                 }
                             }
                         }
@@ -87,13 +88,10 @@ struct SongDetailView: View {
                         expectedChordName: expectedChordName,
                         song: song
                     )
-                    .padding(.horizontal)
-                    .padding(.vertical, 12)
                     .background(.ultraThinMaterial)
                 }
             }
 
-            // Toast banner
             if showListeningToast {
                 ToastView(message: "Chord Detection On")
                     .padding(.top, 8)
@@ -123,7 +121,12 @@ struct SongDetailView: View {
         }
         .onReceive(listeningEngine.$stableChord) { chord in
             guard listeningEnabled else { return }
-            guard let chord else { return }
+            // Silence clears the restrum guard so the same chord can advance again
+            guard let chord else {
+                lastAdvancedForChord = nil
+                return
+            }
+            // Require a silence gap before the same chord can advance again
             guard chord != lastAdvancedForChord else { return }
             guard chord == expectedChordName else { return }
             lastAdvancedForChord = chord
@@ -135,6 +138,12 @@ struct SongDetailView: View {
         .onDisappear {
             listeningEngine.stop()
         }
+    }
+
+    private func jumpToMeasure(id: UUID) {
+        guard let idx = allMeasures.firstIndex(where: { $0.measure.id == id }) else { return }
+        currentMeasureIndex = idx
+        lastAdvancedForChord = nil
     }
 
     private func toggleListening() {
@@ -149,6 +158,7 @@ struct SongDetailView: View {
                         listeningEngine.start()
                         listeningEnabled = true
                         currentMeasureIndex = 0
+                        lastAdvancedForChord = nil
                         showToast()
                     } else {
                         micPermissionDenied = true
@@ -181,86 +191,78 @@ struct ListeningFeedbackView: View {
     let expectedChordName: String?
     let song: Song
 
-    private var detectedChord: ChordDefinition? {
-        guard let name = engine.rawChord else { return nil }
-        return song.chords.first(where: { $0.name == name })
-    }
-
     private var isCorrect: Bool {
-        guard let detected = engine.rawChord, let expected = expectedChordName else { return false }
-        return detected == expected
-    }
-
-    private var statusColor: Color {
-        guard engine.rawChord != nil else { return .secondary }
-        return isCorrect ? .green : .red
+        guard let h = engine.stableChord, let e = expectedChordName else { return false }
+        return h == e
     }
 
     var body: some View {
-        HStack(spacing: 16) {
-            // Detected chord + mini diagram
-            VStack(alignment: .center, spacing: 4) {
-                Text("Hearing")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let name = engine.rawChord {
-                    Text(name)
-                        .font(.title2.bold())
-                        .foregroundStyle(statusColor)
-                } else {
-                    Text("—")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 56)
+        HStack(spacing: 0) {
+            ChordPanel(
+                label: "Hearing",
+                chordName: engine.stableChord ?? "—",
+                chordDef: song.chords.first(where: { $0.name == engine.stableChord }),
+                stringCount: song.instrument.stringCount,
+                nameColor: engine.stableChord == nil ? .secondary : (isCorrect ? .green : .red),
+                borderColor: engine.stableChord == nil ? .clear : (isCorrect ? .green : .red)
+            )
 
-            if let chord = detectedChord {
-                ChordDiagramView(chord: chord, stringCount: song.instrument.stringCount)
-                    .scaleEffect(0.75, anchor: .top)
-                    .frame(height: 80)
-            } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(.tertiarySystemFill))
-                    .frame(width: 48, height: 72)
-                    .overlay(
-                        Text(engine.rawChord != nil ? engine.rawChord! : "?")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    )
-            }
+            Divider()
 
-            Divider().frame(height: 60)
-
-            // Expected chord
-            VStack(alignment: .center, spacing: 4) {
-                Text("Playing")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(expectedChordName ?? "—")
-                    .font(.title2.bold())
-                    .foregroundStyle(.primary)
-            }
-            .frame(width: 56)
-
-            Spacer()
-
-            // Match icon + confidence
-            VStack(spacing: 6) {
-                if let _ = engine.rawChord {
-                    Image(systemName: isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(statusColor)
-                } else {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title)
-                        .foregroundStyle(.secondary)
-                }
-                Text(engine.rawConfidence > 0 ? "\(Int(engine.rawConfidence * 100))%" : "")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            ChordPanel(
+                label: "Playing",
+                chordName: expectedChordName ?? "—",
+                chordDef: song.chords.first(where: { $0.name == expectedChordName }),
+                stringCount: song.instrument.stringCount,
+                nameColor: isCorrect ? .green : .primary,
+                borderColor: isCorrect ? .green : .clear
+            )
         }
+        .frame(height: 140)
+    }
+}
+
+struct ChordPanel: View {
+    let label: String
+    let chordName: String
+    let chordDef: ChordDefinition?
+    let stringCount: Int
+    let nameColor: Color
+    let borderColor: Color
+
+    // Canvas height: 4 frets * 14 + 30 = 86; no name shown inside (showName: false)
+    private let diagramH: CGFloat = 86
+    private let diagramW: CGFloat = 62  // (4-1)*14+20 for ukulele
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ZStack {
+                if let chord = chordDef {
+                    ChordDiagramView(chord: chord, stringCount: stringCount, showName: false)
+                } else {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color(.separator), lineWidth: 0.5)
+                        .frame(width: diagramW, height: diagramH)
+                }
+            }
+            .frame(width: diagramW, height: diagramH)
+
+            Text(chordName)
+                .font(.title3.bold())
+                .foregroundStyle(nameColor)
+                .frame(height: 22)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(borderColor, lineWidth: 2)
+                .padding(4)
+        )
     }
 }
 

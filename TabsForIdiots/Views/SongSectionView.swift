@@ -5,6 +5,7 @@ struct SongSectionView: View {
     let song: Song
     let currentMeasureId: UUID?
     let matchState: ChordMatchState
+    let onJumpTo: ((UUID) -> Void)?
 
     private var isCurrent: Bool { currentMeasureId != nil }
 
@@ -19,7 +20,8 @@ struct SongSectionView: View {
                 measures: section.measures,
                 song: song,
                 currentMeasureId: currentMeasureId,
-                matchState: matchState
+                matchState: matchState,
+                onJumpTo: onJumpTo
             )
         }
         .padding(12)
@@ -39,6 +41,7 @@ struct MeasureFlowView: View {
     let song: Song
     let currentMeasureId: UUID?
     let matchState: ChordMatchState
+    let onJumpTo: ((UUID) -> Void)?
 
     var body: some View {
         let lines = stride(from: 0, to: measures.count, by: 4).map {
@@ -50,7 +53,8 @@ struct MeasureFlowView: View {
                     measures: line,
                     song: song,
                     currentMeasureId: currentMeasureId,
-                    matchState: matchState
+                    matchState: matchState,
+                    onJumpTo: onJumpTo
                 )
             }
         }
@@ -62,6 +66,7 @@ struct MeasureLineView: View {
     let song: Song
     let currentMeasureId: UUID?
     let matchState: ChordMatchState
+    let onJumpTo: ((UUID) -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
@@ -70,7 +75,8 @@ struct MeasureLineView: View {
                     measure: measure,
                     song: song,
                     isCurrent: measure.id == currentMeasureId,
-                    matchState: matchState
+                    matchState: matchState,
+                    onJumpTo: onJumpTo
                 )
             }
         }
@@ -82,6 +88,9 @@ struct MeasureCell: View {
     let song: Song
     let isCurrent: Bool
     let matchState: ChordMatchState
+    let onJumpTo: ((UUID) -> Void)?
+
+    @State private var isLongPressing = false
 
     private var chordName: String {
         guard let id = measure.chordId else { return "" }
@@ -99,6 +108,7 @@ struct MeasureCell: View {
     }
 
     private var borderColor: Color {
+        if isLongPressing { return .orange }
         guard isCurrent else { return .clear }
         switch matchState {
         case .correct:  return .green
@@ -113,8 +123,7 @@ struct MeasureCell: View {
         switch matchState {
         case .correct:  return .green
         case .wrong:    return .red
-        case .waiting:  return .blue
-        case .none:     return .blue
+        case .waiting, .none: return .blue
         }
     }
 
@@ -132,6 +141,15 @@ struct MeasureCell: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(RoundedRectangle(cornerRadius: 6).fill(highlightColor))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(borderColor, lineWidth: isCurrent ? 1.5 : 0))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(borderColor, lineWidth: isCurrent || isLongPressing ? 1.5 : 0))
+        .scaleEffect(isLongPressing ? 0.95 : 1.0)
+        .animation(.easeInOut(duration: 0.15), value: isLongPressing)
+        .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
+            guard onJumpTo != nil else { return }
+            isLongPressing = pressing
+        }, perform: {
+            onJumpTo?(measure.id)
+            isLongPressing = false
+        })
     }
 }

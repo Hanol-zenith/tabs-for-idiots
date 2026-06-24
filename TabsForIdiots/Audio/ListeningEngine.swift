@@ -3,8 +3,6 @@ import Accelerate
 
 @MainActor
 class ListeningEngine: ObservableObject {
-    @Published var rawChord: String? = nil
-    @Published var rawConfidence: Float = 0.0
     @Published var stableChord: String? = nil
     @Published var stableConfidence: Float = 0.0
     @Published var isRunning = false
@@ -15,12 +13,10 @@ class ListeningEngine: ObservableObject {
     private var hann: [Float] = []
     private var hardwareSampleRate: Float = 48000
 
-    // Stability gate: chord must be detected N times in a row before it counts
     private var lastRawName: String? = nil
     private var consecutiveCount: Int = 0
-    private let requiredConsecutive = 4
-    private let minimumConfidence: Float = 0.72
-    // Amplitude gate: filters out quiet voices / ambient noise
+    private let requiredConsecutive = 3
+    private let minimumConfidence: Float = 0.68
     private let minimumRMS: Float = 0.008
 
     init() {
@@ -54,8 +50,6 @@ class ListeningEngine: ObservableObject {
         audioEngine?.stop()
         audioEngine = nil
         isRunning = false
-        rawChord = nil
-        rawConfidence = 0
         stableChord = nil
         stableConfidence = 0
         lastRawName = nil
@@ -67,14 +61,16 @@ class ListeningEngine: ObservableObject {
         let frameCount = Int(buffer.frameLength)
         let count = min(frameCount, fftSize)
 
-        // Amplitude gate — skip if signal is too quiet (voice, ambient)
         var rms: Float = 0
         vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(count))
+
         guard rms > minimumRMS else {
             DispatchQueue.main.async { [weak self] in
-                self?.rawChord = nil
-                self?.rawConfidence = 0
-                self?.resetStability()
+                guard let self else { return }
+                self.lastRawName = nil
+                self.consecutiveCount = 0
+                self.stableChord = nil
+                self.stableConfidence = 0
             }
             return
         }
@@ -104,7 +100,7 @@ class ListeningEngine: ObservableObject {
                 vDSP_zvmags(&split, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
 
                 let freqResolution = self.hardwareSampleRate / Float(self.fftSize)
-                let minBin = Int(150 / freqResolution)   // ignore below 150 Hz (most voice fundamentals)
+                let minBin = Int(150 / freqResolution)
                 let maxBin = Int(5000 / freqResolution)
 
                 var peaks: [(freq: Float, mag: Float)] = []
@@ -116,15 +112,11 @@ class ListeningEngine: ObservableObject {
                 }
 
                 peaks.sort { $0.mag > $1.mag }
-                let topPeaks = Array(peaks.prefix(8))
-                let pitchClasses = Set(topPeaks.compactMap { self.freqToPitchClass($0.freq) })
+                let pitchClasses = Set(peaks.prefix(8).compactMap { self.freqToPitchClass($0.freq) })
                 let result = self.recognizer.identify(pitchClasses: pitchClasses)
 
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.rawChord = result?.name
-                    self.rawConfidence = result?.confidence ?? 0
-
                     if let name = result?.name, (result?.confidence ?? 0) >= self.minimumConfidence {
                         if name == self.lastRawName {
                             self.consecutiveCount += 1
@@ -137,18 +129,12 @@ class ListeningEngine: ObservableObject {
                             self.consecutiveCount = 1
                         }
                     } else {
-                        self.resetStability()
+                        self.lastRawName = nil
+                        self.consecutiveCount = 0
                     }
                 }
             }
         }
-    }
-
-    private func resetStability() {
-        lastRawName = nil
-        consecutiveCount = 0
-        stableChord = nil
-        stableConfidence = 0
     }
 
     private func freqToPitchClass(_ freq: Float) -> Int? {
