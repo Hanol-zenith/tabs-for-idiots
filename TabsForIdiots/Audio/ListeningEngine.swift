@@ -12,6 +12,7 @@ class ListeningEngine: ObservableObject {
     private let fftSize = 4096
     private let recognizer = ChordRecognizer()
     private var hann: [Float] = []
+    private var hardwareSampleRate: Float = 48000
 
     init() {
         hann = (0..<4096).map { i in
@@ -23,7 +24,9 @@ class ListeningEngine: ObservableObject {
         guard !isRunning else { return }
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+        // Use the hardware's native format to avoid sample rate mismatch crashes
+        let format = input.outputFormat(forBus: 0)
+        hardwareSampleRate = Float(format.sampleRate)
 
         input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(fftSize), format: format) { [weak self] buffer, _ in
             self?.process(buffer: buffer)
@@ -75,8 +78,7 @@ class ListeningEngine: ObservableObject {
                 var magnitudes = [Float](repeating: 0, count: fftSize / 2)
                 vDSP_zvmags(&split, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
 
-                let sampleRate: Float = 44100
-                let freqResolution = sampleRate / Float(fftSize)
+                let freqResolution = self.hardwareSampleRate / Float(self.fftSize)
                 let minBin = Int(100 / freqResolution)
                 let maxBin = Int(5000 / freqResolution)
 

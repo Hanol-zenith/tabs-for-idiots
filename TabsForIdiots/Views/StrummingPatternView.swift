@@ -10,7 +10,7 @@ struct StrummingPatternView: View {
                 ForEach(Array(pattern.strokes.enumerated()), id: \.offset) { _, stroke in
                     Text(stroke.symbol)
                         .font(.system(size: 18))
-                        .foregroundStyle(stroke.isDown ? .primary : .blue)
+                        .foregroundStyle(stroke.isDown ? Color.primary : Color.blue)
                 }
             }
             HStack(spacing: 8) {
