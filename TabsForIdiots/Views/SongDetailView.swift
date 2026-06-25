@@ -31,13 +31,17 @@ struct SongDetailView: View {
     // Playing column: keeps the exiting measure green for ~0.8 s after advance.
     @State private var lastCorrectMeasureIndex: Int? = nil
     // Hearing column: same ForEach/offset mechanism as the Playing column.
-    // hearingSlot increments on each advance; the SAME card that was at pos=0
-    // (full size, live detection) becomes pos=-1 (small, green) after the slide.
+    // hearingSlot is the *current* slot index; it increments 250 ms after each
+    // correct advance so the card has time to sit full-size and green first.
     @State private var hearingSlot: Int = 0
-    @State private var hearingHistory: [Int: String] = [:]   // slot → chord name
+    @State private var hearingHistory: [Int: String] = [:]
     @State private var lastCorrectHearingSlot: Int? = nil
-    // After advancing, suppress live detection display for 0.6 s so the lingering
-    // ring from the previous chord doesn't appear in the new center slot as red.
+    // Slot whose increment is queued for 250 ms — flushed immediately if the
+    // next advance fires before the delay expires.
+    @State private var pendingHearingSlot: Int? = nil
+    // Suppresses the hearing display after an advance until silence OR a
+    // different chord is detected, so the lingering ring of the old chord
+    // cannot appear in the new center slot.
     @State private var heardChordBlocked = false
 
     init(song: Song) {
@@ -232,7 +236,15 @@ struct SongDetailView: View {
 
         guard let chord else {
             chordWentSilentSinceAdvance = true
+            // Silence means the ring has faded — unblock the hearing display.
+            heardChordBlocked = false
             return
+        }
+
+        // A chord different from the one that just advanced means the user has
+        // started a new strum, even without a silence gap — unblock the display.
+        if heardChordBlocked && chord != lastChordThatAdvanced {
+            heardChordBlocked = false
         }
 
         if chord == lastChordThatAdvanced {
@@ -242,39 +254,48 @@ struct SongDetailView: View {
 
         guard chord == expectedChordName else { return }
 
+        // Flush any pending hearing-slot increment from the previous advance
+        // so this advance starts from a clean slot.
         cancelCleanup()
+
         chordWentSilentSinceAdvance = false
         lastChordThatAdvanced = chord
         lastAdvanceTime = Date()
         heardChordBlocked = true
 
         let next = currentMeasureIndex + 1
-        let currentSlot = hearingSlot
-        // Record what was heard in this slot BEFORE advancing the slot counter,
-        // so the same card view (keyed by currentSlot) has its offset change from
-        // pos=0 → pos=-1 inside withAnimation — identical to the Playing column.
-        hearingHistory[currentSlot] = chord
+        let currentSlot = hearingSlot          // not changed yet
+        hearingHistory[currentSlot] = chord    // record before the slide
 
+        // Phase A (immediate): advance the Playing column and light the Hearing
+        // card green at full size.  hearingSlot does NOT change here — the card
+        // sits at pos=0 full-size so the user can clearly see "correct".
         withAnimation(.spring(duration: 0.28, bounce: 0.0)) {
             lastCorrectMeasureIndex = currentMeasureIndex
             lastCorrectHearingSlot = currentSlot
-            hearingSlot = currentSlot + 1   // drives the Hearing column slide
             if next < allMeasures.count {
                 currentMeasureIndex = next
             }
         }
 
-        cleanupTask = Task { @MainActor in
-            // Phase 1 (0.6 s): unblock live hearing — ring should be gone.
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            heardChordBlocked = false
+        pendingHearingSlot = currentSlot
 
-            // Phase 2 (0.2 s later = 0.8 s total): fade green out of both columns.
-            try? await Task.sleep(nanoseconds: 200_000_000)
+        cleanupTask = Task { @MainActor in
+            // Phase B (250 ms): slide the Hearing card up to pos=-1.
+            // Slightly slower spring so the movement is easy to follow.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                hearingSlot = currentSlot + 1
+            }
+            pendingHearingSlot = nil
+
+            // Phase C (250 + 800 ms): fade green out of both columns.
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) {
                 lastCorrectMeasureIndex = nil
                 lastCorrectHearingSlot = nil
-                hearingHistory.removeValue(forKey: currentSlot)
             }
         }
     }
@@ -282,6 +303,12 @@ struct SongDetailView: View {
     private func cancelCleanup() {
         cleanupTask?.cancel()
         cleanupTask = nil
+        // If a hearing-slot increment was queued, flush it now so the slot
+        // counter is consistent before the next advance sets its own slot.
+        if let pending = pendingHearingSlot {
+            hearingSlot = pending + 1
+            pendingHearingSlot = nil
+        }
     }
 
     private func syncTempo() {
@@ -292,6 +319,14 @@ struct SongDetailView: View {
         }
     }
 
+    private func resetHearingState() {
+        hearingSlot = 0
+        hearingHistory = [:]
+        lastCorrectHearingSlot = nil
+        pendingHearingSlot = nil
+        heardChordBlocked = false
+    }
+
     private func jumpToMeasure(id: UUID) {
         cancelCleanup()
         guard let idx = allMeasures.firstIndex(where: { $0.measure.id == id }) else { return }
@@ -300,10 +335,7 @@ struct SongDetailView: View {
         lastAdvanceTime = .distantPast
         chordWentSilentSinceAdvance = true
         lastCorrectMeasureIndex = nil
-        hearingSlot = 0
-        hearingHistory = [:]
-        lastCorrectHearingSlot = nil
-        heardChordBlocked = false
+        resetHearingState()
     }
 
     private func toggleListening() {
@@ -322,10 +354,7 @@ struct SongDetailView: View {
                         lastAdvanceTime = .distantPast
                         chordWentSilentSinceAdvance = true
                         lastCorrectMeasureIndex = nil
-                        hearingSlot = 0
-                        hearingHistory = [:]
-                        lastCorrectHearingSlot = nil
-                        heardChordBlocked = false
+                        resetHearingState()
                         showToast()
                     } else {
                         micPermissionDenied = true
@@ -360,10 +389,6 @@ struct ChordTeleprompterView: View {
     let matchState: ChordMatchState
     let heardChordName: String?
     let heardChordBlocked: Bool
-    // Hearing column uses the same ForEach/offset mechanism as Playing column.
-    // hearingSlot is the "current" slot index; hearingHistory maps past slots to
-    // chord names.  When hearingSlot increments, the card at pos=0 (full size)
-    // automatically animates to pos=-1 (small, green) via .animation on the ZStack.
     let hearingSlot: Int
     let hearingHistory: [Int: String]
     let lastCorrectHearingSlot: Int?
@@ -372,6 +397,7 @@ struct ChordTeleprompterView: View {
     private let cardAreaHeight: CGFloat = 200
     private let slotSpacing: CGFloat = 88
 
+    // Live heard chord, suppressed while heardChordBlocked (lingering ring window).
     private var effectiveHeardName: String? {
         heardChordBlocked ? nil : heardChordName
     }
@@ -380,6 +406,7 @@ struct ChordTeleprompterView: View {
         song.chords.first(where: { $0.name == effectiveHeardName })
     }
 
+    // Include the previous slot only when history exists for it.
     private var hearingIndices: [Int] {
         var result = [hearingSlot]
         let prev = hearingSlot - 1
@@ -406,16 +433,23 @@ struct ChordTeleprompterView: View {
         HStack(alignment: .top, spacing: 0) {
 
             // ── Hearing column ──────────────────────────────────────────
-            // The ForEach is keyed on hearingSlot index, so the SAME card
-            // view that was showing the live chord at pos=0 (full size) slides
-            // to pos=-1 (smaller, green) when hearingSlot increments — exactly
-            // mirroring how the Playing column works.
+            //
+            // Two-phase animation:
+            //   Phase A (immediate): lastCorrectHearingSlot set — card at pos=0
+            //     shows GREEN and FULL SIZE so the user can see "correct".
+            //   Phase B (250 ms later): hearingSlot increments — the same card
+            //     view now has pos=-1 and springs to the smaller "above" slot.
+            //
+            // heardChordBlocked suppresses live detection display after an advance
+            // until silence OR a different chord is detected.  When isCurrent &&
+            // isGreen, the card reads from hearingHistory instead so the correct
+            // chord is still visible during Phase A even though display is blocked.
             VStack(spacing: 0) {
                 columnLabel("Hearing")
 
                 ZStack {
                     ForEach(hearingIndices, id: \.self) { idx in
-                        let pos = idx - hearingSlot       // -1 or 0
+                        let pos = idx - hearingSlot
                         let isCurrent = pos == 0
                         let isGreen = idx == lastCorrectHearingSlot
 
@@ -423,18 +457,33 @@ struct ChordTeleprompterView: View {
                         let opacity: Double = isCurrent ? 1.0 : (isGreen ? 0.88 : 0.20)
                         let yOff: CGFloat   = CGFloat(pos) * slotSpacing
 
-                        let name: String = isCurrent
-                            ? (effectiveHeardName ?? "—")
-                            : (hearingHistory[idx] ?? "—")
-                        let def: ChordDefinition? = isCurrent
-                            ? heardDef
-                            : song.chords.first(where: { $0.name == hearingHistory[idx] })
-                        let nameColor: Color = {
-                            if isGreen   { return .green }
+                        // During Phase A the current card is green and blocked —
+                        // read the chord from history so the diagram/name shows.
+                        let name: String = {
                             if isCurrent {
+                                if isGreen, let h = hearingHistory[idx] { return h }
+                                return effectiveHeardName ?? "—"
+                            }
+                            return hearingHistory[idx] ?? "—"
+                        }()
+
+                        let def: ChordDefinition? = {
+                            if isCurrent {
+                                if isGreen, let h = hearingHistory[idx] {
+                                    return song.chords.first(where: { $0.name == h })
+                                }
+                                return heardDef
+                            }
+                            return song.chords.first(where: { $0.name == hearingHistory[idx] })
+                        }()
+
+                        let nameColor: Color = {
+                            if isGreen { return .green }
+                            if isCurrent {
+                                if heardChordBlocked { return .secondary }
                                 switch matchState {
                                 case .correct: return .green
-                                case .wrong:   return heardChordBlocked ? .secondary : .red
+                                case .wrong:   return .red
                                 default:       return .primary
                                 }
                             }
@@ -446,18 +495,19 @@ struct ChordTeleprompterView: View {
                             def: def,
                             stringCount: song.instrument.stringCount,
                             nameColor: nameColor,
-                            showListeningIcon: isCurrent && effectiveHeardName == nil
+                            showListeningIcon: isCurrent && effectiveHeardName == nil && !isGreen
                         )
                         .scaleEffect(scale)
                         .opacity(opacity)
                         .offset(y: yOff)
                         .zIndex(isCurrent ? 1 : 0)
+                        .transition(.opacity)
                     }
                 }
                 .frame(height: cardAreaHeight)
                 .clipped()
-                .animation(.spring(duration: 0.28, bounce: 0.0), value: hearingSlot)
-                .animation(.easeOut(duration: 0.30),              value: lastCorrectHearingSlot)
+                .animation(.spring(response: 0.45, dampingFraction: 0.85), value: hearingSlot)
+                .animation(.easeOut(duration: 0.30), value: lastCorrectHearingSlot)
             }
             .frame(maxWidth: .infinity)
 
@@ -560,7 +610,7 @@ struct ChordCard: View {
 
 struct StrummingMetronomeView: View {
     let pattern: StrummingPattern
-    let currentStrokeIndex: Int  // -1 = tempo off: show pattern without highlighting
+    let currentStrokeIndex: Int
 
     var body: some View {
         HStack(spacing: 0) {
@@ -619,7 +669,7 @@ struct TempoControlsView: View {
     }
 }
 
-// MARK: - Mode picker (custom, supports disabled state)
+// MARK: - Mode picker
 
 struct ModePicker: View {
     @Binding var selection: DisplayMode
