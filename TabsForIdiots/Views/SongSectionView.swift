@@ -5,7 +5,6 @@ struct SongSectionView: View {
     let song: Song
     let displayMode: DisplayMode
     let currentMeasureId: UUID?
-    let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
 
     private var isCurrent: Bool { currentMeasureId != nil }
@@ -29,7 +28,6 @@ struct SongSectionView: View {
                 song: song,
                 displayMode: displayMode,
                 currentMeasureId: currentMeasureId,
-                matchState: matchState,
                 onJumpTo: onJumpTo
             )
         }
@@ -50,7 +48,6 @@ struct MeasureFlowView: View {
     let song: Song
     let displayMode: DisplayMode
     let currentMeasureId: UUID?
-    let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
 
     var body: some View {
@@ -64,7 +61,6 @@ struct MeasureFlowView: View {
                     song: song,
                     displayMode: displayMode,
                     currentMeasureId: currentMeasureId,
-                    matchState: matchState,
                     onJumpTo: onJumpTo
                 )
             }
@@ -77,7 +73,6 @@ struct MeasureLineView: View {
     let song: Song
     let displayMode: DisplayMode
     let currentMeasureId: UUID?
-    let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
 
     var body: some View {
@@ -88,7 +83,6 @@ struct MeasureLineView: View {
                     song: song,
                     displayMode: displayMode,
                     isCurrent: measure.id == currentMeasureId,
-                    matchState: matchState,
                     onJumpTo: onJumpTo
                 )
             }
@@ -101,7 +95,6 @@ struct MeasureCell: View {
     let song: Song
     let displayMode: DisplayMode
     let isCurrent: Bool
-    let matchState: ChordMatchState
     let onJumpTo: ((UUID) -> Void)?
 
     @State private var isLongPressing = false
@@ -117,49 +110,17 @@ struct MeasureCell: View {
         return song.strummingPatterns.first(where: { $0.id == id })
     }
 
-    private var highlightColor: Color {
-        guard isCurrent else { return .clear }
-        switch matchState {
-        case .correct:          return .green.opacity(0.18)
-        case .wrong:            return .red.opacity(0.15)
-        case .waiting, .none:   return .blue.opacity(0.08)
-        }
-    }
-
-    private var borderColor: Color {
-        if isLongPressing { return .orange }
-        guard isCurrent else { return .clear }
-        switch matchState {
-        case .correct:          return .green
-        case .wrong:            return .red
-        case .waiting:          return .blue.opacity(0.5)
-        case .none:             return .clear
-        }
-    }
-
-    private var chordColor: Color {
-        guard isCurrent else { return .blue }
-        switch matchState {
-        case .correct:          return .green
-        case .wrong:            return .red
-        case .waiting, .none:   return .blue
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            // Chord name
             Text(chordName.isEmpty ? " " : chordName)
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(chordColor)
+                .foregroundStyle(Color.blue)
                 .frame(minWidth: 72, alignment: .leading)
 
-            // Lyric
             Text(measure.lyric.isEmpty ? " " : measure.lyric)
                 .font(.system(size: 15))
                 .frame(minWidth: 72, alignment: .leading)
 
-            // Strumming / picking arrows (only when mode is active)
             if let pattern = strummingPattern {
                 HStack(spacing: 1) {
                     ForEach(Array(pattern.strokes.enumerated()), id: \.offset) { _, stroke in
@@ -173,9 +134,20 @@ struct MeasureCell: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(highlightColor))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(borderColor, lineWidth: isCurrent || isLongPressing ? 1.5 : 0))
-        .scaleEffect(isLongPressing ? 0.95 : 1.0)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isCurrent ? Color(.systemBackground) : Color.clear)
+                .shadow(color: isCurrent ? .black.opacity(0.18) : .clear, radius: 6, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(
+                    isLongPressing ? Color.orange : (isCurrent ? Color.accentColor.opacity(0.55) : Color.clear),
+                    lineWidth: (isCurrent || isLongPressing) ? 1.5 : 0
+                )
+        )
+        .scaleEffect(isLongPressing ? 0.95 : (isCurrent ? 1.05 : 1.0))
+        .animation(.spring(response: 0.22, dampingFraction: 0.75), value: isCurrent)
         .animation(.easeInOut(duration: 0.15), value: isLongPressing)
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
             guard onJumpTo != nil else { return }
