@@ -9,6 +9,9 @@ struct ChordDiagramView: View {
     private let cellW: CGFloat = 14
     private let cellH: CGFloat = 14
     private let dotR: CGFloat = 5
+    // Raised from 12 → 18 so open-string circles (drawn at originY − 10 = 8)
+    // are no longer clipped at the top of the canvas.
+    private let originY: CGFloat = 18
 
     var gridW: CGFloat { cellW * CGFloat(stringCount - 1) }
 
@@ -21,7 +24,6 @@ struct ChordDiagramView: View {
 
             Canvas { ctx, size in
                 let originX = (size.width - gridW) / 2
-                let originY: CGFloat = 12
 
                 if chord.baseFret == 1 {
                     let nutRect = CGRect(x: originX, y: originY, width: gridW, height: 3)
@@ -69,7 +71,7 @@ struct ChordDiagramView: View {
                 }
             }
             .frame(width: CGFloat(stringCount - 1) * cellW + 20,
-                   height: CGFloat(fretCount) * cellH + 30)
+                   height: CGFloat(fretCount) * cellH + 36)  // +6 more headroom for open markers
 
             if chord.baseFret > 1 {
                 Text("\(chord.baseFret)fr")

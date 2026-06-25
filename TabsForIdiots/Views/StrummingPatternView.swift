@@ -11,6 +11,7 @@ struct StrummingPatternView: View {
                     Text(stroke.symbol)
                         .font(.system(size: 18))
                         .foregroundStyle(stroke.isDown ? Color.primary : Color.blue)
+                        .frame(width: 18, alignment: .center)
                 }
             }
             HStack(spacing: 8) {

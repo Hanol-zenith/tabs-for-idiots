@@ -54,7 +54,7 @@ struct MeasureFlowView: View {
         let lines = stride(from: 0, to: measures.count, by: 4).map {
             Array(measures[$0..<min($0 + 4, measures.count)])
         }
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                 MeasureLineView(
                     measures: line,
@@ -76,7 +76,10 @@ struct MeasureLineView: View {
     let onJumpTo: ((UUID) -> Void)?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
+        // Equal-width cells, no horizontal gap. Each cell has its own left padding.
+        // This produces proper lead-sheet column alignment: all chord names on one
+        // visual row, all lyrics on the row directly below.
+        HStack(alignment: .top, spacing: 0) {
             ForEach(measures) { measure in
                 MeasureCell(
                     measure: measure,
@@ -85,6 +88,8 @@ struct MeasureLineView: View {
                     isCurrent: measure.id == currentMeasureId,
                     onJumpTo: onJumpTo
                 )
+                .frame(maxWidth: .infinity)
+                .id(measure.id)
             }
         }
     }
@@ -99,9 +104,25 @@ struct MeasureCell: View {
 
     @State private var isLongPressing = false
 
+    // ── Derived strings ──────────────────────────────────────────────────
+
     private var chordName: String {
         guard let id = measure.chordId else { return "" }
         return song.chords.first(where: { $0.id == id })?.name ?? ""
+    }
+
+    // `·` characters extracted from lyric → displayed inline with chord name.
+    private var beatDots: String {
+        let count = measure.lyric.filter { $0 == "·" }.count
+        guard count > 0 else { return "" }
+        return Array(repeating: "·", count: count).joined(separator: " ")
+    }
+
+    // Lyric words / dashes, with beat markers removed.
+    private var lyricWords: String {
+        var s = measure.lyric.filter { $0 != "·" }
+        while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
+        return s.trimmingCharacters(in: .whitespaces)
     }
 
     private var strummingPattern: StrummingPattern? {
@@ -111,42 +132,49 @@ struct MeasureCell: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(chordName.isEmpty ? " " : chordName)
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color.blue)
-                .frame(minWidth: 72, alignment: .leading)
+        VStack(alignment: .leading, spacing: 1) {
+            // ── Row 1: chord name + beat dots (same visual row) ─────────
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(chordName.isEmpty ? " " : chordName)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.blue)
 
-            Text(measure.lyric.isEmpty ? " " : measure.lyric)
-                .font(.system(size: 15))
-                .frame(minWidth: 72, alignment: .leading)
-
-            if let pattern = strummingPattern {
-                HStack(spacing: 1) {
-                    ForEach(Array(pattern.strokes.enumerated()), id: \.offset) { _, stroke in
-                        Text(stroke.symbol)
-                            .font(.system(size: 10))
-                            .foregroundStyle(stroke.isDown ? Color.primary.opacity(0.7) : Color.blue.opacity(0.8))
-                    }
+                if !beatDots.isEmpty {
+                    Text(beatDots)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
                 }
-                .padding(.top, 1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
+
+            // ── Row 2: lyric words / dashes only ────────────────────────
+            Text(lyricWords.isEmpty ? " " : lyricWords)
+                .font(.system(size: 14))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+
+            // Strumming is shown in the legend at the top, not repeated per cell.
+            // (Songs with variable strum per measure can add it back here.)
         }
-        .padding(.horizontal, 6)
+        .padding(.leading, 6)
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isCurrent ? Color(.systemBackground) : Color.clear)
-                .shadow(color: isCurrent ? .black.opacity(0.18) : .clear, radius: 6, y: 2)
+                .fill(isCurrent
+                    ? Color.accentColor.opacity(0.12)
+                    : Color.clear)
+                .shadow(color: isCurrent ? .black.opacity(0.28) : .clear, radius: 8, y: 3)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(
-                    isLongPressing ? Color.orange : (isCurrent ? Color.accentColor.opacity(0.55) : Color.clear),
-                    lineWidth: (isCurrent || isLongPressing) ? 1.5 : 0
+                    isLongPressing ? Color.orange : (isCurrent ? Color.accentColor.opacity(0.80) : Color.clear),
+                    lineWidth: (isCurrent || isLongPressing) ? 2.0 : 0
                 )
         )
-        .scaleEffect(isLongPressing ? 0.95 : (isCurrent ? 1.05 : 1.0))
+        .scaleEffect(isLongPressing ? 0.95 : (isCurrent ? 1.06 : 1.0))
         .animation(.spring(response: 0.22, dampingFraction: 0.75), value: isCurrent)
         .animation(.easeInOut(duration: 0.15), value: isLongPressing)
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in

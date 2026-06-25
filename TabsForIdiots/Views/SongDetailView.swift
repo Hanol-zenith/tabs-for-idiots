@@ -131,6 +131,25 @@ struct SongDetailView: View {
                                 }
                             }
                         }
+                        // When listening and the user completes the last measure in a
+                        // 4-measure line, scroll immediately so the next line is visible.
+                        .onChange(of: currentMeasureIndex) { oldIdx, newIdx in
+                            guard listeningEnabled else { return }
+                            guard newIdx < allMeasures.count, oldIdx >= 0, oldIdx < allMeasures.count else { return }
+                            let newSec = allMeasures[newIdx].sectionIndex
+                            let oldSec = allMeasures[oldIdx].sectionIndex
+                            guard newSec == oldSec else { return }  // section onChange handles this
+                            let secStart = allMeasures.firstIndex(where: { $0.sectionIndex == newSec }) ?? 0
+                            let lineNew = (newIdx - secStart) / 4
+                            let lineOld = (oldIdx - secStart) / 4
+                            guard lineNew != lineOld else { return }
+                            let lineStartIdx = secStart + lineNew * 4
+                            guard lineStartIdx < allMeasures.count else { return }
+                            let targetId = allMeasures[lineStartIdx].measure.id
+                            withAnimation {
+                                proxy.scrollTo(targetId, anchor: .top)
+                            }
+                        }
                     }
                 }
 

@@ -25,6 +25,6 @@ struct TabsForIdiotsApp: App {
     @MainActor
     private func bootstrap() async {
         let context = container.mainContext
-        SampleSongs.seedIfNeeded { context.insert($0) }
+        SampleSongs.seedIfNeeded(in: context)
     }
 }
