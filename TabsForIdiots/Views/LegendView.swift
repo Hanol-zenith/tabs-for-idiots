@@ -4,6 +4,7 @@ struct LegendView: View {
     let song: Song
 
     @State private var pageIdx = 0
+    @GestureState private var dragOffset: CGFloat = 0
 
     private struct DGroup: Identifiable {
         let id = UUID()
@@ -61,7 +62,10 @@ struct LegendView: View {
                     }
                     .contentShape(Rectangle())
                     .gesture(
-                        DragGesture(minimumDistance: 28)
+                        DragGesture(minimumDistance: 10)
+                            .updating($dragOffset) { value, state, _ in
+                                state = value.translation.height
+                            }
                             .onEnded { val in
                                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                                     if val.translation.height < -28 {
@@ -89,7 +93,7 @@ struct LegendView: View {
                     ZStack {
                         ForEach(Array(g.enumerated()), id: \.offset) { i, group in
                             let isCurrent = i == safeIdx
-                            let yOff = CGFloat(i - safeIdx) * labelStep
+                            let yOff = CGFloat(i - safeIdx) * labelStep + dragOffset
 
                             Button {
                                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {

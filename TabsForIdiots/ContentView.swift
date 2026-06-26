@@ -6,7 +6,12 @@ struct ContentView: View {
             NavigationStack {
                 SongListView()
             }
-            .tabItem { Label("Songs", systemImage: "music.note.list") }
+            .tabItem { Label("My Songs", systemImage: "music.note.list") }
+
+            NavigationStack {
+                FindSongsView()
+            }
+            .tabItem { Label("Find Songs", systemImage: "magnifyingglass") }
         }
     }
 }

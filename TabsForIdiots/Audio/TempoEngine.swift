@@ -5,29 +5,38 @@ final class TempoEngine: ObservableObject {
     @Published var currentStrokeIndex: Int = 0
     @Published var isRunning: Bool = false
 
-    private var timer: Timer?
-    private var strokeCount: Int = 4
+    private var runTask: Task<Void, Never>?
 
-    // Each stroke = (beatsPerMeasure * 60 / bpm) / strokeCount seconds.
-    // Assumes 4/4 time.
-    func start(bpm: Double, strokeCount: Int) {
+    // intervals: quarter-note duration per stroke (empty = equal across 4 beats).
+    func start(bpm: Double, strokeCount: Int, intervals: [Double] = []) {
         guard bpm > 0, strokeCount > 0 else { return }
         stop()
-        self.strokeCount = strokeCount
-        let interval = (4.0 * 60.0 / bpm) / Double(strokeCount)
+
+        let beatSeconds = 60.0 / bpm
+        let resolved: [Double]
+        if intervals.count == strokeCount {
+            resolved = intervals.map { $0 * beatSeconds }
+        } else {
+            let equal = 4.0 * beatSeconds / Double(strokeCount)
+            resolved = Array(repeating: equal, count: strokeCount)
+        }
+
         currentStrokeIndex = 0
         isRunning = true
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.isRunning else { return }
-                self.currentStrokeIndex = (self.currentStrokeIndex + 1) % strokeCount
+
+        runTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let sleepNS = UInt64(max(0.01, resolved[currentStrokeIndex]) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: sleepNS)
+                guard !Task.isCancelled else { break }
+                currentStrokeIndex = (currentStrokeIndex + 1) % strokeCount
             }
         }
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        runTask?.cancel()
+        runTask = nil
         isRunning = false
         currentStrokeIndex = 0
     }

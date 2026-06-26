@@ -28,6 +28,7 @@ struct SongDetailView: View {
     @State private var cleanupTask: Task<Void, Never>? = nil
     @State private var tempoEnabled = true
     @State private var userTempo: Int
+    @State private var sessionStart: Date? = nil
     // Playing column: keeps the exiting measure green for ~0.8 s after advance.
     @State private var lastCorrectMeasureIndex: Int? = nil
     // Hearing column: same ForEach/offset mechanism as the Playing column.
@@ -48,7 +49,11 @@ struct SongDetailView: View {
         self.song = song
         _listeningEngine = StateObject(wrappedValue: ListeningEngine())
         _tempoEngine = StateObject(wrappedValue: TempoEngine())
-        _userTempo = State(initialValue: song.tempo)
+        let key = song.title
+        let savedBPM = UserDefaults.standard.integer(forKey: "bpm-\(key)")
+        _userTempo = State(initialValue: savedBPM > 0 ? savedBPM : song.tempo)
+        let savedEnabled = UserDefaults.standard.object(forKey: "tempoEnabled-\(key)") as? Bool
+        _tempoEnabled = State(initialValue: savedEnabled ?? true)
     }
 
     // MARK: - Computed helpers
@@ -190,17 +195,37 @@ struct SongDetailView: View {
             handleStableChord(chord)
         }
         .onChange(of: displayMode)         { _, _ in syncTempo() }
-        .onChange(of: tempoEnabled)        { _, _ in syncTempo() }
-        .onChange(of: userTempo)           { _, _ in syncTempo() }
+        .onChange(of: tempoEnabled)        { _, enabled in
+            syncTempo()
+            UserDefaults.standard.set(enabled, forKey: "tempoEnabled-\(song.title)")
+        }
+        .onChange(of: userTempo)           { _, bpm in
+            syncTempo()
+            UserDefaults.standard.set(bpm, forKey: "bpm-\(song.title)")
+        }
         .onChange(of: currentMeasureIndex) { _, _ in syncTempo() }
         .onChange(of: listeningEnabled) { _, enabled in
             if !enabled { cancelCleanup() }
         }
+        .onAppear {
+            let now = Date()
+            sessionStart = now
+            song.lastPlayedAt = now   // update "recently played" on every open
+        }
         .onDisappear {
+            if let start = sessionStart {
+                let elapsed = Date().timeIntervalSince(start)
+                if elapsed >= 15 {
+                    song.playCount += 1
+                    song.totalPracticeSeconds += elapsed
+                }
+                sessionStart = nil
+            }
             listeningEngine.stop()
             tempoEngine.stop()
             cancelCleanup()
         }
+        .toolbar(.hidden, for: .tabBar)
     }
 
     // MARK: - Bottom panel
@@ -332,7 +357,9 @@ struct SongDetailView: View {
 
     private func syncTempo() {
         if displayMode != .chordsOnly && tempoEnabled, let pattern = currentStrummingPattern {
-            tempoEngine.start(bpm: Double(userTempo), strokeCount: pattern.strokes.count)
+            tempoEngine.start(bpm: Double(userTempo),
+                              strokeCount: pattern.strokes.count,
+                              intervals: pattern.intervals)
         } else {
             tempoEngine.stop()
         }

@@ -11,6 +11,10 @@ final class Song {
     var chordsJSON: Data
     var strummingPatternsJSON: Data
     var sectionsJSON: Data
+    var createdAt: Date = Date()
+    var lastPlayedAt: Date? = nil
+    var playCount: Int = 0          // sessions lasting ≥ 15 seconds
+    var totalPracticeSeconds: Double = 0
 
     var instrument: Instrument {
         get { Instrument(rawValue: instrumentRaw) ?? .ukulele }

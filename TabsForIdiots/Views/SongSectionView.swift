@@ -1,5 +1,20 @@
 import SwiftUI
 
+// MARK: - Environment key for per-song lyric font size
+
+private struct LyricFontSizeKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 12
+}
+
+extension EnvironmentValues {
+    var lyricFontSize: CGFloat {
+        get { self[LyricFontSizeKey.self] }
+        set { self[LyricFontSizeKey.self] = newValue }
+    }
+}
+
+// MARK: -
+
 struct SongSectionView: View {
     let section: SongSection
     let song: Song
@@ -8,6 +23,24 @@ struct SongSectionView: View {
     let onJumpTo: ((UUID) -> Void)?
 
     private var isCurrent: Bool { currentMeasureId != nil }
+
+    // Largest font size that fits every lyric in its assigned row mode.
+    // Long lyrics (>30 chars) go in a solo 2× wide row, so they're normalized down.
+    // Short lyrics (≤10 chars) go in a 4-per-row 0.5× cell, so they're normalized up.
+    private func lyricFontSize(for song: Song) -> CGFloat {
+        let maxEffective = song.sections.flatMap { $0.measures }.map { m -> Int in
+            let c = m.lyric.count
+            if c > 30 { return c / 2 }   // solo row → 2× cell width available
+            if c <= 10 { return c * 2 }  // 4-per-row → 0.5× cell width available
+            return c                      // 2-per-row baseline
+        }.max() ?? 0
+        switch maxEffective {
+        case ...14: return 15
+        case ...20: return 14
+        case ...28: return 13
+        default:    return 12
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -25,12 +58,14 @@ struct SongSectionView: View {
 
             MeasureFlowView(
                 measures: section.measures,
+                lineGroupSizes: section.lineGroupSizes,
                 song: song,
                 displayMode: displayMode,
                 currentMeasureId: currentMeasureId,
                 onJumpTo: onJumpTo
             )
         }
+        .environment(\.lyricFontSize, lyricFontSize(for: song))
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
@@ -45,24 +80,82 @@ struct SongSectionView: View {
 
 struct MeasureFlowView: View {
     let measures: [SongMeasure]
+    let lineGroupSizes: [Int]
     let song: Song
     let displayMode: DisplayMode
     let currentMeasureId: UUID?
     let onJumpTo: ((UUID) -> Void)?
 
-    var body: some View {
-        let lines = stride(from: 0, to: measures.count, by: 4).map {
-            Array(measures[$0..<min($0 + 4, measures.count)])
+    // Split flat measures into .pro-line groups using lineGroupSizes.
+    // Empty lineGroupSizes → single group containing all measures.
+    private func proLines() -> [[SongMeasure]] {
+        guard !lineGroupSizes.isEmpty else { return [measures] }
+        var result: [[SongMeasure]] = []
+        var start = 0
+        for size in lineGroupSizes {
+            let end = min(start + size, measures.count)
+            if start < end { result.append(Array(measures[start..<end])) }
+            start = end
         }
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                MeasureLineView(
-                    measures: line,
-                    song: song,
-                    displayMode: displayMode,
-                    currentMeasureId: currentMeasureId,
-                    onJumpTo: onJumpTo
-                )
+        return result
+    }
+
+    // Greedy layout within one .pro line → app rows of 1, 2, or 4 measures.
+    //   lyric > 30 chars  → always solo (full-width row)
+    //   lyric ≤ 10 chars  → prefer 4-per-row; fall back to 2-per-row or solo
+    //   otherwise         → 2-per-row or solo
+    private func appRows(for proLine: [SongMeasure]) -> [[SongMeasure]] {
+        var rows: [[SongMeasure]] = []
+        var i = 0
+        while i < proLine.count {
+            let len = proLine[i].lyric.count
+            if len > 30 {
+                rows.append([proLine[i]])
+                i += 1
+            } else if len <= 10 {
+                let rem = proLine.count - i
+                if rem >= 4 &&
+                   proLine[i+1].lyric.count <= 10 &&
+                   proLine[i+2].lyric.count <= 10 &&
+                   proLine[i+3].lyric.count <= 10 {
+                    rows.append(Array(proLine[i..<(i+4)]))
+                    i += 4
+                } else if i + 1 < proLine.count && proLine[i+1].lyric.count <= 30 {
+                    rows.append([proLine[i], proLine[i+1]])
+                    i += 2
+                } else {
+                    rows.append([proLine[i]])
+                    i += 1
+                }
+            } else {
+                if i + 1 < proLine.count && proLine[i+1].lyric.count <= 30 {
+                    rows.append([proLine[i], proLine[i+1]])
+                    i += 2
+                } else {
+                    rows.append([proLine[i]])
+                    i += 1
+                }
+            }
+        }
+        return rows
+    }
+
+    var body: some View {
+        let lines = proLines()
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(lines.indices, id: \.self) { lineIdx in
+                let rows = appRows(for: lines[lineIdx])
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(rows.indices, id: \.self) { rowIdx in
+                        MeasureLineView(
+                            measures: rows[rowIdx],
+                            song: song,
+                            displayMode: displayMode,
+                            currentMeasureId: currentMeasureId,
+                            onJumpTo: onJumpTo
+                        )
+                    }
+                }
             }
         }
     }
@@ -102,6 +195,7 @@ struct MeasureCell: View {
     let isCurrent: Bool
     let onJumpTo: ((UUID) -> Void)?
 
+    @Environment(\.lyricFontSize) private var lyricFontSize
     @State private var isLongPressing = false
 
     // ── Derived strings ──────────────────────────────────────────────────
@@ -109,13 +203,6 @@ struct MeasureCell: View {
     private var chordName: String {
         guard let id = measure.chordId else { return "" }
         return song.chords.first(where: { $0.id == id })?.name ?? ""
-    }
-
-    // `·` characters extracted from lyric → displayed inline with chord name.
-    private var beatDots: String {
-        let count = measure.lyric.filter { $0 == "·" }.count
-        guard count > 0 else { return "" }
-        return Array(repeating: "·", count: count).joined(separator: " ")
     }
 
     // Lyric words / dashes, with beat markers removed.
@@ -132,34 +219,19 @@ struct MeasureCell: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            // ── Row 1: chord name + beat dots (same visual row) ─────────
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(chordName.isEmpty ? " " : chordName)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.blue)
-
-                if !beatDots.isEmpty {
-                    Text(beatDots)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.secondary.opacity(0.55))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .lineLimit(1)
-
-            // ── Row 2: lyric words / dashes only ────────────────────────
-            Text(lyricWords.isEmpty ? " " : lyricWords)
-                .font(.system(size: 14))
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(chordName.isEmpty ? " " : chordName)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.blue)
                 .lineLimit(1)
-                .minimumScaleFactor(0.70)
-
-            // Strumming is shown in the legend at the top, not repeated per cell.
-            // (Songs with variable strum per measure can add it back here.)
+            Text(lyricWords.isEmpty ? " " : lyricWords)
+                .font(.system(size: lyricFontSize))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
         }
-        .padding(.leading, 6)
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 4)
+        .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isCurrent

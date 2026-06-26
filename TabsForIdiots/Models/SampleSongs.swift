@@ -2,10 +2,9 @@ import Foundation
 import SwiftData
 
 struct SampleSongs {
-    // Bumped to V5 — full SOTR rewrite from SJUC/SUP PDF (seacoastukuleleplayers.com).
-    // Chords: C, Em, F, E7, Am, G. Strum: DD uu D (5 strokes). Intro: C|Em|F|C|F|E7|Am|F.
+    // Bumped to V15 — lineGroupSizes added to SongSection; lyric alignment pass.
     static func seedIfNeeded(in context: ModelContext) {
-        let key = "tabsForIdiotsSeededV5"
+        let key = "tabsForIdiotsSeededV15"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         try? context.delete(model: Song.self)
         context.insert(makeSomewhereOverTheRainbow())
@@ -14,15 +13,9 @@ struct SampleSongs {
     }
 
     // MARK: - Somewhere Over the Rainbow
-    // Source: SJUC (San Jose Ukulele Club) / SUP arrangement
-    // Key: C | 4/4 | ♩=70 | Strum: 1-2-3&4 (DD uu D)
-    //
-    // Song structure: Intro → Verse → Chorus → Bridge → Bluebirds → Bridge → Bluebirds → Outro
-    //
-    // Lyric convention:
-    //   - Lyric row: words and dashes only (e.g. "Some -")
-    //   - Chord row: chord name + beat markers (· · ·) for fully held measures
-    //   - "· · · ·" in lyric field = all beats are instrumental (no text on lyric row)
+    // Source: user-authored ChordPro
+    // Key: C | 4/4 | ♩=75 | Strum: Island Strum (D D U U D U)
+    // Structure: Intro → V1 → V2 → Bridge1 → V3 → Bridge2 → V4 → Outro
 
     private static func makeSomewhereOverTheRainbow() -> Song {
         let cChord  = ChordDefinition(name: "C",  frets: [0,0,0,3], fingers: [0,0,0,3])
@@ -32,129 +25,123 @@ struct SampleSongs {
         let amChord = ChordDefinition(name: "Am", frets: [2,0,0,0], fingers: [2,0,0,0])
         let gChord  = ChordDefinition(name: "G",  frets: [0,2,3,2], fingers: [0,1,3,2])
 
-        // Strum: 1-2-3&4 = DD uu D (5 strokes)
         let pattern = StrummingPattern(
-            name: "1-2-3&4 Strum",
-            strokes: [.down, .down, .up, .up, .down]
+            name: "Island Strum",
+            strokes: [.down, .down, .up, .up, .down, .up],
+            intervals: [1.0, 0.5, 0.5, 0.5, 0.5, 1.0]
         )
 
         func m(_ chord: ChordDefinition, _ lyric: String) -> SongMeasure {
             SongMeasure(chordId: chord.id, strummingPatternId: pattern.id, lyric: lyric)
         }
-        let REST = "· · · ·"   // instrumental / held — renders as beat dots in chord row
 
-        // ── INTRO (8 bars = 2 lines) ─────────────────────────────────────
-        // C | Em | F | C | F | E7 | Am | F
-        // Vocal: "Ooo" humming throughout
+        // ── INTRO / OUTRO (8 bars: C Em F C / F E7 Am F) ─────────────────
+        // lineGroupSizes [4,4]: two .pro lines of 4 chords → 4-per-row each
         let intro = SongSection(name: "Intro", measures: [
-            // Line 1
-            m(cChord,  "Ooo -"),
-            m(emChord, "Ooo -"),
-            m(fChord,  "Oo-o-o"),
-            m(cChord,  "Oooo -"),
-            // Line 2
-            m(fChord,  "O-o-Ooo"),
-            m(e7Chord, "Oooo -"),
-            m(amChord, "Oo-o"),
-            m(fChord,  "Oo-o"),
-        ])
+            m(cChord,  "Oooo,"),
+            m(emChord, "oooo,"),
+            m(fChord,  "oooo,"),
+            m(cChord,  "oooo..."),
+            m(fChord,  "Oooo,"),
+            m(e7Chord, "oooo,"),
+            m(amChord, "oooo,"),
+            m(fChord,  "oooo..."),
+        ], lineGroupSizes: [4, 4])
 
-        // ── VERSE (8 bars = 2 lines) ─────────────────────────────────────
-        // "Somewhere over the rainbow, way up high…"
-        // Line 1: C | Em | F | C
-        // Line 2: F | C  | G | Am
-        let verse = SongSection(name: "Verse", measures: [
-            // Line 1
-            m(cChord,  "Some -"),
-            m(emChord, "where -"),
-            m(fChord,  "o-ver rain-bow"),
-            m(cChord,  "way up high"),
-            // Line 2
-            m(fChord,  "There's a"),
-            m(cChord,  "land that I"),
-            m(gChord,  "heard of, once"),
-            m(amChord, "in a lull-a-by"),
-        ])
+        // ── VERSE (9 bars: C Em F C / F C G Am F) ─────────────────────────
+        // lineGroupSizes [4,5]: .pro line 1 = C Em F C, .pro line 2 = F C G Am F
 
-        // ── CHORUS (8 bars = 2 lines) ────────────────────────────────────
-        // "Somewhere over the rainbow, skies are blue…"
-        // Same chord progression as Verse, different lyrics
-        let chorus = SongSection(name: "Chorus", measures: [
-            // Line 1
-            m(cChord,  "Some -"),
-            m(emChord, "where -"),
-            m(fChord,  "o-ver rain-bow"),
-            m(cChord,  "skies are blue"),
-            // Line 2
-            m(fChord,  "And the dreams"),
-            m(cChord,  "that you dare"),
-            m(gChord,  "to dream real-ly"),
-            m(amChord, "do come true"),
-        ])
+        let verse1 = SongSection(name: "Verse 1", measures: [
+            m(cChord,  "Somewhere"),
+            m(emChord, "over the rainbow,"),
+            m(fChord,  "— way up"),           // F plays 2 silent beats before "way"
+            m(cChord,  "high"),
+            m(fChord,  "and the"),
+            m(cChord,  "dreams that you dream of"),
+            m(gChord,  "once in a lull-a-"),  // Am chord falls on "b" of "lullaby"
+            m(amChord, "-by."),
+            m(fChord,  "Ohhhh."),
+        ], lineGroupSizes: [4, 5])
 
-        // Bridge and Bluebirds each appear twice in the arrangement.
-        // Build them as separate instances so each gets its own UUID (required for ForEach).
-        func makeBridge() -> SongSection {
-            SongSection(name: "Bridge", measures: [
-                // Line 1: C | G | Am | F
-                m(cChord,  "Some-day I'll"),
-                m(gChord,  "wish up-on a"),
-                m(amChord, "star, wake up"),
-                m(fChord,  "where clouds are"),
-                // Line 2: C | G | Am | F
-                m(cChord,  "far be-hind me"),
-                m(gChord,  "trou-bles melt"),
-                m(amChord, "like lem-on drops"),
-                m(fChord,  "that's where"),
-            ])
+        let verse2 = SongSection(name: "Verse 2", measures: [
+            m(cChord,  "Somewhere"),
+            m(emChord, "over the rainbow"),
+            m(fChord,  "bluebirds"),
+            m(cChord,  "fly"),
+            m(fChord,  "and the"),
+            m(cChord,  "dreams that you dream of,"),
+            m(gChord,  "dreams really do come"),
+            m(amChord, "true."),
+            m(fChord,  "Ohhhh."),
+        ], lineGroupSizes: [4, 5])
+
+        let verse3 = SongSection(name: "Verse 3", measures: [
+            m(cChord,  "Somewhere"),
+            m(emChord, "over the rainbow,"),
+            m(fChord,  "— bluebirds"),              // F plays 2 silent beats before "bluebirds"
+            m(cChord,  "fly"),
+            m(fChord,  "and the"),
+            m(cChord,  "dreams that you dare to, oh,"),  // C covers through "oh,"
+            m(gChord,  "why, oh why can't"),
+            m(amChord, "I?"),
+            m(fChord,  "I-I-I, oh"),
+        ], lineGroupSizes: [4, 5])
+
+        let verse4 = SongSection(name: "Verse 4", measures: [
+            m(cChord,  "Somewhere"),
+            m(emChord, "over the rainbow,"),
+            m(fChord,  "— way up"),
+            m(cChord,  "high"),
+            m(fChord,  "and the"),
+            m(cChord,  "dreams that you dare to,"),
+            m(gChord,  "why, oh why can't"),
+            m(amChord, "I?"),
+            m(fChord,  "I-I-I"),
+        ], lineGroupSizes: [4, 5])
+
+        // ── BRIDGE (8 bars: C / Em Am F / C / Em / Am F) ──────────────────
+        // lineGroupSizes [1,3,1,1,2]: each .pro line as a separate group.
+        // Bridge uses Em on chord 2 (not G). Two variants differ only in "behind me."
+        func makeBridge(name: String, behindMe: String) -> SongSection {
+            SongSection(name: name, measures: [
+                m(cChord,  "(Some-)day I'll wish upon a star,"),
+                m(emChord, "wake up where the clouds are far be-"),
+                m(amChord, "-hind"),
+                m(fChord,  behindMe),
+                m(cChord,  "(Where) troubles melt like lemon drops,"), // "Where" pickup before C
+                m(emChord, "high above the chimney tops, that's"),     // Em extends into "that's"
+                m(amChord, "where you'll"),                            // Am starts on "where"
+                m(fChord,  "find me, oh"),
+            ], lineGroupSizes: [1, 3, 1, 1, 2])
         }
 
-        func makeBluebirds() -> SongSection {
-            SongSection(name: "Bluebirds", measures: [
-                // Line 1: C | Em | F | C
-                m(cChord,  "Oh, Some -"),
-                m(emChord, "where -"),
-                m(fChord,  "o-ver rain-bow"),
-                m(cChord,  "blue-birds fly"),
-                // Line 2: F | C | G | Am
-                m(fChord,  "Birds fly o-"),
-                m(cChord,  "ver the rain-bow"),
-                m(gChord,  "why then, oh why"),
-                m(amChord, "can't I -?"),
-            ])
-        }
-
-        // ── OUTRO (8 bars = 2 lines) ─────────────────────────────────────
-        // Same chord sequence as Intro (C | Em | F | C | F | E7 | Am | F)
         let outro = SongSection(name: "Outro", measures: [
-            // Line 1
-            m(cChord,  "Ooo -"),
-            m(emChord, "Ooo -"),
-            m(fChord,  "Oo-o-o"),
-            m(cChord,  "Oooo -"),
-            // Line 2
-            m(fChord,  "O-o-Ooo"),
-            m(e7Chord, "Oooo -"),
-            m(amChord, "Oo-o"),
-            m(fChord,  "Oo-o"),
-        ])
+            m(cChord,  "Oooo,"),
+            m(emChord, "oooo,"),
+            m(fChord,  "oooo,"),
+            m(cChord,  "oooo..."),
+            m(fChord,  "Oooo,"),
+            m(e7Chord, "oooo,"),
+            m(amChord, "oooo,"),
+            m(fChord,  "oooo..."),
+        ], lineGroupSizes: [4, 4])
 
         return Song(
             title: "Somewhere Over the Rainbow",
             artist: "Israel Kamakawiwoʻole",
             instrument: .ukulele,
-            tempo: 70,
+            tempo: 75,
             key: "C",
             chords: [cChord, emChord, fChord, e7Chord, amChord, gChord],
             strummingPatterns: [pattern],
             sections: [
                 intro,
-                verse,
-                chorus,
-                makeBridge(),
-                makeBluebirds(),
-                makeBridge(),
-                makeBluebirds(),
+                verse1,
+                verse2,
+                makeBridge(name: "Bridge 1", behindMe: "me."),
+                verse3,
+                makeBridge(name: "Bridge 2", behindMe: "me-e-e."),
+                verse4,
                 outro,
             ]
         )
@@ -174,13 +161,15 @@ struct SampleSongs {
             SongMeasure(chordId: chord.id, strummingPatternId: pattern.id, lyric: lyric)
         }
 
+        // 4 chords per .pro line → [4] lets them collapse to one 4-per-row app row
         let intro = SongSection(name: "Intro", measures: [
             m(amChord, REST),
             m(gChord,  REST),
             m(cChord,  REST),
             m(cChord,  REST),
-        ])
+        ], lineGroupSizes: [4])
 
+        // Each verse .pro line is Am G C C (4 chords)
         let verse1 = SongSection(name: "Verse 1", measures: [
             m(amChord, "I was scared of"),
             m(gChord,  "dentists and"),
@@ -198,14 +187,14 @@ struct SampleSongs {
             m(gChord,  "gi-cian's as-sis-"),
             m(cChord,  "tant in their dreams."),
             m(cChord,  REST),
-        ])
+        ], lineGroupSizes: [4, 4, 4, 4])
 
         let preChorus = SongSection(name: "Pre-Chorus", measures: [
             m(amChord, "And they come"),
             m(gChord,  "un-sta-ble"),
             m(cChord,  REST),
             m(cChord,  REST),
-        ])
+        ], lineGroupSizes: [2, 2])
 
         let chorus = SongSection(name: "Chorus", measures: [
             m(amChord, "I love you when"),
@@ -220,7 +209,7 @@ struct SampleSongs {
             m(gChord,  REST),
             m(cChord,  REST),
             m(cChord,  REST),
-        ])
+        ], lineGroupSizes: [4, 4, 4])
 
         return Song(
             title: "Riptide",
