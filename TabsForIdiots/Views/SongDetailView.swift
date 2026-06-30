@@ -26,6 +26,8 @@ struct SongDetailView: View {
     @State private var lastAdvanceTime: Date = .distantPast
     @State private var chordWentSilentSinceAdvance = true
     @State private var cleanupTask: Task<Void, Never>? = nil
+    @State private var showSettings = false
+    @AppStorage("alwaysResumePosition") private var alwaysResumePosition = false
     @State private var tempoEnabled = true
     @State private var userTempo: Int
     @State private var sessionStart: Date? = nil
@@ -100,6 +102,15 @@ struct SongDetailView: View {
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
+                Text(song.title)
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemBackground))
+
+                Divider()
+
                 LegendView(song: song)
                     .padding()
                     .background(.ultraThinMaterial)
@@ -131,7 +142,7 @@ struct SongDetailView: View {
                         .onChange(of: currentSectionIndex) { _, newIdx in
                             let sections = song.sections
                             if newIdx < sections.count {
-                                withAnimation {
+                                withAnimation(.easeOut(duration: 0.2)) {
                                     proxy.scrollTo(sections[newIdx].id, anchor: .top)
                                 }
                             }
@@ -151,7 +162,7 @@ struct SongDetailView: View {
                             let lineStartIdx = secStart + lineNew * 4
                             guard lineStartIdx < allMeasures.count else { return }
                             let targetId = allMeasures[lineStartIdx].measure.id
-                            withAnimation {
+                            withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo(targetId, anchor: .top)
                             }
                         }
@@ -170,14 +181,24 @@ struct SongDetailView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .navigationTitle(song.title)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: toggleListening) {
-                    Image(systemName: listeningEnabled ? "waveform.circle.fill" : "waveform.circle")
-                        .font(.title3)
+                HStack(spacing: 14) {
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                            .font(.body)
+                    }
+                    Button(action: toggleListening) {
+                        VStack(spacing: 2) {
+                            Image(systemName: listeningEnabled ? "waveform.circle.fill" : "waveform.circle")
+                                .font(.title3)
+                            Text(listeningEnabled ? "Stop" : "Listen")
+                                .font(.caption2)
+                        }
                         .foregroundStyle(listeningEnabled ? .red : .primary)
+                    }
                 }
             }
         }
@@ -190,6 +211,28 @@ struct SongDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enable microphone access in Settings to use chord detection.")
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                Form {
+                    Section("When listening starts") {
+                        Picker("Start position", selection: $alwaysResumePosition) {
+                            Text("From the beginning").tag(false)
+                            Text("Resume where I left off").tag(true)
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    }
+                }
+                .navigationTitle("Listening Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showSettings = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
         .onReceive(listeningEngine.$stableChord) { chord in
             handleStableChord(chord)
@@ -213,6 +256,7 @@ struct SongDetailView: View {
             song.lastPlayedAt = now   // update "recently played" on every open
         }
         .onDisappear {
+            UserDefaults.standard.set(currentMeasureIndex, forKey: "measureIndex-\(song.title)")
             if let start = sessionStart {
                 let elapsed = Date().timeIntervalSince(start)
                 if elapsed >= 15 {
@@ -386,6 +430,7 @@ struct SongDetailView: View {
 
     private func toggleListening() {
         if listeningEnabled {
+            UserDefaults.standard.set(currentMeasureIndex, forKey: "measureIndex-\(song.title)")
             listeningEngine.stop()
             listeningEnabled = false
         } else {
@@ -395,7 +440,12 @@ struct SongDetailView: View {
                     if granted {
                         listeningEngine.start()
                         listeningEnabled = true
-                        currentMeasureIndex = 0
+                        if alwaysResumePosition {
+                            let saved = UserDefaults.standard.integer(forKey: "measureIndex-\(song.title)")
+                            currentMeasureIndex = allMeasures.isEmpty ? 0 : min(max(saved, 0), allMeasures.count - 1)
+                        } else {
+                            currentMeasureIndex = 0
+                        }
                         lastChordThatAdvanced = nil
                         lastAdvanceTime = .distantPast
                         chordWentSilentSinceAdvance = true

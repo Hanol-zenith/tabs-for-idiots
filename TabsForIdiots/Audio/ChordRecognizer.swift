@@ -27,17 +27,39 @@ struct ChordRecognizer {
         ("Bbm", [1, 6, 10]),
     ]
 
-    func identify(pitchClasses: Set<Int>) -> (name: String, confidence: Float)? {
-        guard !pitchClasses.isEmpty else { return nil }
-        var best: (name: String, confidence: Float)? = nil
-        for def in chordDefs {
-            let intersection = pitchClasses.intersection(def.classes)
-            let union = pitchClasses.union(def.classes)
-            let score = Float(intersection.count) / Float(union.count)
-            if score > (best?.confidence ?? 0) {
-                best = (def.name, score)
-            }
+    func identify(peaks: [(pitchClass: Int, magnitude: Float)]) -> (name: String, confidence: Float)? {
+        guard !peaks.isEmpty else { return nil }
+
+        // Sum signal power per pitch class (harmonics of the same note share a class).
+        var pcMag: [Int: Float] = [:]
+        for p in peaks { pcMag[p.pitchClass, default: 0] += p.magnitude }
+        let pcSet    = Set(pcMag.keys)
+        let totalMag = pcMag.values.reduce(0, +)
+        guard totalMag > 0 else { return nil }
+
+        struct Candidate { let name: String; let classes: Set<Int>; let score: Float }
+        let ranked: [Candidate] = chordDefs.map { def in
+            let matchCount = Float(pcSet.intersection(def.classes).count)
+            let recall     = matchCount / Float(def.classes.count)
+            // Magnitude-weighted precision: fraction of total signal power that belongs
+            // to this chord's notes. A quiet stray resonance barely hurts the score.
+            let matchMag  = def.classes.compactMap { pcMag[$0] }.reduce(0, +)
+            let precision = matchMag / totalMag
+            return Candidate(name: def.name, classes: def.classes, score: recall * 0.7 + precision * 0.3)
+        }.sorted { $0.score > $1.score }
+
+        guard let best = ranked.first else { return nil }
+        guard let runner = ranked.dropFirst().first else { return (best.name, best.score) }
+
+        if best.score - runner.score >= 0.15 {
+            return (best.name, best.score)
         }
-        return best
+
+        // Near-tie: compare signal power of each chord's exclusive notes.
+        // C vs Am: whichever of G or A is louder wins. E7 vs E: D being audible wins.
+        let bestExMag   = best.classes.subtracting(runner.classes).compactMap { pcMag[$0] }.reduce(0, +)
+        let runnerExMag = runner.classes.subtracting(best.classes).compactMap { pcMag[$0] }.reduce(0, +)
+        if bestExMag > runnerExMag { return (best.name, best.score) }
+        return nil
     }
 }

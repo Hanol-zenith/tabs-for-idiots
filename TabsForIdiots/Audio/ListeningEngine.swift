@@ -15,7 +15,8 @@ class ListeningEngine: ObservableObject {
 
     private var lastRawName: String? = nil
     private var consecutiveCount: Int = 0
-    private let requiredConsecutive = 3
+    private let requiredConsecutive = 2    // frames to establish a chord from silence
+    private let chordChangeConsecutive = 4 // frames to switch away from an already-stable chord
     private let minimumConfidence: Float = 0.68
     private let minimumRMS: Float = 0.008
 
@@ -112,15 +113,23 @@ class ListeningEngine: ObservableObject {
                 }
 
                 peaks.sort { $0.mag > $1.mag }
-                let pitchClasses = Set(peaks.prefix(8).compactMap { self.freqToPitchClass($0.freq) })
-                let result = self.recognizer.identify(pitchClasses: pitchClasses)
+                let topPeaks = peaks.prefix(8).compactMap { p -> (pitchClass: Int, magnitude: Float)? in
+                    guard let pc = self.freqToPitchClass(p.freq) else { return nil }
+                    return (pc, p.mag)
+                }
+                let result = self.recognizer.identify(peaks: topPeaks)
 
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     if let name = result?.name, (result?.confidence ?? 0) >= self.minimumConfidence {
                         if name == self.lastRawName {
                             self.consecutiveCount += 1
-                            if self.consecutiveCount >= self.requiredConsecutive {
+                            // Require more frames to switch away from an established chord,
+                            // so brief false detections of a similar chord don't steal it.
+                            let required = (self.stableChord != nil && name != self.stableChord)
+                                ? self.chordChangeConsecutive
+                                : self.requiredConsecutive
+                            if self.consecutiveCount >= required {
                                 self.stableChord = name
                                 self.stableConfidence = result?.confidence ?? 0
                             }
@@ -128,10 +137,9 @@ class ListeningEngine: ObservableObject {
                             self.lastRawName = name
                             self.consecutiveCount = 1
                         }
-                    } else {
-                        self.lastRawName = nil
-                        self.consecutiveCount = 0
                     }
+                    // Ambiguous/nil frames: do nothing — just pause the counter.
+                    // Silence resets everything via the RMS guard above.
                 }
             }
         }
