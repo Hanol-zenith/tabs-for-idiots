@@ -70,6 +70,7 @@ struct FindSongsView: View {
                 }
             }
         }
+        .scrollIndicators(.visible)
         .navigationTitle("Find Songs")
         .searchable(text: $searchText, prompt: "Search songs or artists")
         .toolbar {

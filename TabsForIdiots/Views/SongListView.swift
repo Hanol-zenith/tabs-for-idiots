@@ -51,25 +51,28 @@ struct SongListView: View {
     }
 
     var body: some View {
-        List(songs) { song in
-            NavigationLink(destination: SongDetailView(song: song)) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title).font(.headline)
-                    Text(song.artist).font(.subheadline).foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        Label(song.instrument.rawValue.capitalized, systemImage: "music.note")
-                        Text("♩= \(song.tempo)")
-                        Text(song.key)
-                        if song.totalPracticeSeconds > 0 {
-                            Text("· \(formatPracticeTime(song.totalPracticeSeconds))")
+        List {
+            ForEach(songs) { song in
+                NavigationLink(destination: SongDetailView(song: song)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(song.title).font(.headline)
+                        Text(song.artist).font(.subheadline).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Label(song.instrument.rawValue.capitalized, systemImage: "music.note")
+                            Text("♩= \(song.tempo)")
+                            Text(song.key)
+                            if song.totalPracticeSeconds > 0 {
+                                Text("· \(formatPracticeTime(song.totalPracticeSeconds))")
+                            }
                         }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             }
         }
+        .scrollIndicators(.visible)
         .navigationTitle("My Songs")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

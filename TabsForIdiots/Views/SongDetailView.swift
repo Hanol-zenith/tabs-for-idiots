@@ -27,6 +27,7 @@ struct SongDetailView: View {
     @State private var chordWentSilentSinceAdvance = true
     @State private var cleanupTask: Task<Void, Never>? = nil
     @State private var showSettings = false
+    @State private var showSongEndAlert = false
     @AppStorage("alwaysResumePosition") private var alwaysResumePosition = false
     @State private var legendExpanded = true
     @State private var tempoEnabled = true
@@ -148,7 +149,7 @@ struct SongDetailView: View {
 
                 Divider()
 
-                ScrollView {
+                PersistentScrollView(axes: .vertical) {
                     ScrollViewReader { proxy in
                         VStack(alignment: .leading, spacing: 24) {
                             ForEach(Array(song.sections.enumerated()), id: \.element.id) { sIndex, section in
@@ -252,6 +253,32 @@ struct SongDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enable microphone access in Settings to use chord detection.")
+        }
+        .alert("Song Complete!", isPresented: $showSongEndAlert) {
+            Button("Start Over") {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    lastCorrectMeasureIndex = nil
+                    lastCorrectHearingSlot = nil
+                }
+                currentMeasureIndex = 0
+                lastChordThatAdvanced = nil
+                lastAdvanceTime = .distantPast
+                chordWentSilentSinceAdvance = true
+                resetHearingState()
+            }
+            Button("Stop Listening", role: .cancel) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    lastCorrectMeasureIndex = nil
+                    lastCorrectHearingSlot = nil
+                }
+                UserDefaults.standard.set(0, forKey: "measureIndex-\(song.title)")
+                listeningEngine.stop()
+                listeningEnabled = false
+                currentMeasureIndex = 0
+                resetHearingState()
+            }
+        } message: {
+            Text("You've played through the whole song.")
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
@@ -411,6 +438,11 @@ struct SongDetailView: View {
             if next < allMeasures.count {
                 currentMeasureIndex = next
             }
+        }
+
+        if next >= allMeasures.count {
+            showSongEndAlert = true
+            return
         }
 
         pendingHearingSlot = currentSlot

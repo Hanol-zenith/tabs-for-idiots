@@ -7,14 +7,40 @@ struct LegendView: View {
         let id = UUID()
         let difficulty: ChordDifficulty
         let chords: [ChordDefinition]
-        var label: String { difficulty.label }
     }
 
+    // One row per difficulty level, each sorted chromatically.
     private var groups: [DGroup] {
         ChordDifficulty.allCases.compactMap { d in
-            let matching = song.chords.filter { $0.difficulty == d }
-            return matching.isEmpty ? nil : DGroup(difficulty: d, chords: matching)
+            let sorted = song.chords
+                .filter { $0.difficulty == d }
+                .sorted { chromaticSortKey($0.name) < chromaticSortKey($1.name) }
+            return sorted.isEmpty ? nil : DGroup(difficulty: d, chords: sorted)
         }
+    }
+
+    private func chromaticSortKey(_ name: String) -> (Int, Int) {
+        (chromaticRoot(name), qualitySort(name))
+    }
+
+    private func chromaticRoot(_ name: String) -> Int {
+        let two: [(String, Int)] = [
+            ("Bb", 10), ("Db", 1), ("Eb", 3), ("Gb", 6), ("Ab", 8),
+            ("C#", 1), ("D#", 3), ("F#", 6), ("G#", 8), ("A#", 10)
+        ]
+        for (prefix, pc) in two where name.hasPrefix(prefix) { return pc }
+        let one: [(String, Int)] = [
+            ("C", 0), ("D", 2), ("E", 4), ("F", 5), ("G", 7), ("A", 9), ("B", 11)
+        ]
+        for (prefix, pc) in one where name.hasPrefix(prefix) { return pc }
+        return 0
+    }
+
+    private func qualitySort(_ name: String) -> Int {
+        if name.hasSuffix("m7") { return 3 }
+        if name.hasSuffix("m")  { return 1 }
+        if name.hasSuffix("7")  { return 2 }
+        return 0
     }
 
     private var uniformStrum: Bool {
@@ -25,23 +51,20 @@ struct LegendView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Chord tabs — scrolls vertically to show All / Easy / Medium / Hard
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if !song.chords.isEmpty {
-                        chordRow(label: "Chords", chords: song.chords)
+            if !song.chords.isEmpty {
+                PersistentScrollView(axes: .vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(groups) { group in
+                            chordRow(chords: group.chords)
+                        }
                     }
-                    ForEach(groups) { group in
-                        chordRow(label: group.label, chords: group.chords)
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .frame(maxHeight: 160)
             }
-            .frame(maxHeight: 160)
 
-            // Strumming stays pinned — does not scroll with the tabs
             if !song.strummingPatterns.isEmpty {
                 Divider()
                 strummingSection
@@ -51,20 +74,14 @@ struct LegendView: View {
         }
     }
 
-    // MARK: - Sub-views
-
-    private func chordRow(label: String, chords: [ChordDefinition]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 14) {
-                    ForEach(chords) { chord in
-                        ChordDiagramView(chord: chord, stringCount: song.instrument.stringCount)
-                    }
+    private func chordRow(chords: [ChordDefinition]) -> some View {
+        PersistentScrollView(axes: .horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(chords) { chord in
+                    ChordDiagramView(chord: chord, stringCount: song.instrument.stringCount)
                 }
             }
+            .padding(.vertical, 8)
         }
     }
 
