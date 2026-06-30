@@ -28,6 +28,7 @@ struct SongDetailView: View {
     @State private var cleanupTask: Task<Void, Never>? = nil
     @State private var showSettings = false
     @AppStorage("alwaysResumePosition") private var alwaysResumePosition = false
+    @State private var legendExpanded = true
     @State private var tempoEnabled = true
     @State private var userTempo: Int
     @State private var sessionStart: Date? = nil
@@ -97,25 +98,48 @@ struct SongDetailView: View {
         listeningEnabled || displayMode != .chordsOnly
     }
 
+    // MARK: - Sub-views
+
+    @ViewBuilder
+    private var titleRow: some View {
+        HStack {
+            Text(song.title)
+                .font(.title3.weight(.semibold))
+            Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { legendExpanded.toggle() }
+            } label: {
+                Image(systemName: legendExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+    }
+
+    @ViewBuilder
+    private var legendSection: some View {
+        if legendExpanded {
+            LegendView(song: song)
+                .background(.ultraThinMaterial)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            Divider()
+                .transition(.opacity)
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
-                Text(song.title)
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color(.systemBackground))
+                titleRow
 
                 Divider()
 
-                LegendView(song: song)
-                    .padding()
-                    .background(.ultraThinMaterial)
-
-                Divider()
+                legendSection
 
                 ModePicker(selection: $displayMode, pickingAvailable: song.hasPickingData)
                     .padding(.horizontal)
@@ -126,7 +150,7 @@ struct SongDetailView: View {
 
                 ScrollView {
                     ScrollViewReader { proxy in
-                        LazyVStack(alignment: .leading, spacing: 24) {
+                        VStack(alignment: .leading, spacing: 24) {
                             ForEach(Array(song.sections.enumerated()), id: \.element.id) { sIndex, section in
                                 SongSectionView(
                                     section: section,
@@ -139,31 +163,48 @@ struct SongDetailView: View {
                             }
                         }
                         .padding()
-                        .onChange(of: currentSectionIndex) { _, newIdx in
+                        .onChange(of: currentSectionIndex) { oldSec, newSec in
                             let sections = song.sections
-                            if newIdx < sections.count {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(sections[newIdx].id, anchor: .top)
+                            guard newSec < sections.count else { return }
+                            if newSec >= oldSec {
+                                // Forward / jump: top of the new section
+                                withAnimation(.easeOut(duration: 0.12)) {
+                                    proxy.scrollTo(sections[newSec].id, anchor: .top)
+                                }
+                            } else {
+                                // Backward across section boundary: land near the current
+                                // measure inside the previous section, not its very top.
+                                guard currentMeasureIndex < allMeasures.count else { return }
+                                let secStart = allMeasures.firstIndex(where: { $0.sectionIndex == newSec }) ?? 0
+                                let lineOfCurrent = (currentMeasureIndex - secStart) / 2
+                                let anchorLine = max(0, lineOfCurrent - 1)
+                                let anchorIdx = secStart + anchorLine * 2
+                                guard anchorIdx < allMeasures.count else { return }
+                                withAnimation(.easeOut(duration: 0.12)) {
+                                    proxy.scrollTo(allMeasures[anchorIdx].measure.id, anchor: .top)
                                 }
                             }
                         }
-                        // When listening and the user completes the last measure in a
-                        // 4-measure line, scroll immediately so the next line is visible.
+                        // On every line crossing (auto-advance or manual buttons):
+                        // anchor to the earlier line so both it and the next are visible.
+                        // Going forward → old line at top (user finishes singing it).
+                        // Going backward → new (current) line at top (user sees context).
+                        // Fast animation keeps up when the user mashes the nav buttons.
                         .onChange(of: currentMeasureIndex) { oldIdx, newIdx in
                             guard listeningEnabled else { return }
                             guard newIdx < allMeasures.count, oldIdx >= 0, oldIdx < allMeasures.count else { return }
                             let newSec = allMeasures[newIdx].sectionIndex
                             let oldSec = allMeasures[oldIdx].sectionIndex
-                            guard newSec == oldSec else { return }  // section onChange handles this
+                            guard newSec == oldSec else { return }
                             let secStart = allMeasures.firstIndex(where: { $0.sectionIndex == newSec }) ?? 0
-                            let lineNew = (newIdx - secStart) / 4
-                            let lineOld = (oldIdx - secStart) / 4
+                            let lineNew = (newIdx - secStart) / 2
+                            let lineOld = (oldIdx - secStart) / 2
                             guard lineNew != lineOld else { return }
-                            let lineStartIdx = secStart + lineNew * 4
-                            guard lineStartIdx < allMeasures.count else { return }
-                            let targetId = allMeasures[lineStartIdx].measure.id
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(targetId, anchor: .top)
+                            let anchorLine = newIdx > oldIdx ? lineOld : lineNew
+                            let anchorIdx  = secStart + anchorLine * 2
+                            guard anchorIdx < allMeasures.count else { return }
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                proxy.scrollTo(allMeasures[anchorIdx].measure.id, anchor: .top)
                             }
                         }
                     }
@@ -278,18 +319,24 @@ struct SongDetailView: View {
     private var bottomPanel: some View {
         VStack(spacing: 0) {
             if listeningEnabled {
-                ChordTeleprompterView(
-                    song: song,
-                    currentMeasureIndex: currentMeasureIndex,
-                    allMeasures: allMeasures,
-                    matchState: matchState,
-                    heardChordName: listeningEngine.stableChord,
-                    heardChordBlocked: heardChordBlocked,
-                    hearingSlot: hearingSlot,
-                    hearingHistory: hearingHistory,
-                    lastCorrectHearingSlot: lastCorrectHearingSlot,
-                    lastCorrectMeasureIndex: lastCorrectMeasureIndex
-                )
+                HStack(spacing: 0) {
+                    navStepButton(systemImage: "chevron.left")  { stepMeasure(by: -1) }
+
+                    ChordTeleprompterView(
+                        song: song,
+                        currentMeasureIndex: currentMeasureIndex,
+                        allMeasures: allMeasures,
+                        matchState: matchState,
+                        heardChordName: listeningEngine.stableChord,
+                        heardChordBlocked: heardChordBlocked,
+                        hearingSlot: hearingSlot,
+                        hearingHistory: hearingHistory,
+                        lastCorrectHearingSlot: lastCorrectHearingSlot,
+                        lastCorrectMeasureIndex: lastCorrectMeasureIndex
+                    )
+
+                    navStepButton(systemImage: "chevron.right") { stepMeasure(by: 1) }
+                }
                 .padding(.top, 6)
             }
 
@@ -426,6 +473,31 @@ struct SongDetailView: View {
         chordWentSilentSinceAdvance = true
         lastCorrectMeasureIndex = nil
         resetHearingState()
+    }
+
+    private func stepMeasure(by delta: Int) {
+        let next = currentMeasureIndex + delta
+        guard next >= 0, next < allMeasures.count else { return }
+        cancelCleanup()
+        currentMeasureIndex = next
+        lastChordThatAdvanced = nil
+        lastAdvanceTime = .distantPast
+        chordWentSilentSinceAdvance = true
+        lastCorrectMeasureIndex = nil
+        resetHearingState()
+    }
+
+    @ViewBuilder
+    private func navStepButton(systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 36)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func toggleListening() {

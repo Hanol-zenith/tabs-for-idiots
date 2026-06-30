@@ -3,9 +3,6 @@ import SwiftUI
 struct LegendView: View {
     let song: Song
 
-    @State private var pageIdx = 0
-    @GestureState private var dragOffset: CGFloat = 0
-
     private struct DGroup: Identifiable {
         let id = UUID()
         let difficulty: ChordDifficulty
@@ -20,138 +17,72 @@ struct LegendView: View {
         }
     }
 
+    private var uniformStrum: Bool {
+        guard song.strummingPatterns.count == 1 else { return false }
+        let pid = song.strummingPatterns[0].id
+        return song.sections.allSatisfy { $0.measures.allSatisfy { $0.strummingPatternId == pid } }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            chordSection
-            strummingSection
+        VStack(alignment: .leading, spacing: 0) {
+            // Chord tabs — scrolls vertically to show All / Easy / Medium / Hard
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if !song.chords.isEmpty {
+                        chordRow(label: "Chords", chords: song.chords)
+                    }
+                    ForEach(groups) { group in
+                        chordRow(label: group.label, chords: group.chords)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            }
+            .frame(maxHeight: 160)
+
+            // Strumming stays pinned — does not scroll with the tabs
+            if !song.strummingPatterns.isEmpty {
+                Divider()
+                strummingSection
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+            }
         }
     }
 
-    // MARK: - Chord section
+    // MARK: - Sub-views
 
-    @ViewBuilder
-    private var chordSection: some View {
-        let g = groups
-        let safeIdx = min(pageIdx, max(0, g.count - 1))
-
-        if g.isEmpty {
-            EmptyView()
-        } else if g.count == 1 {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Chords").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(g[0].chords) { chord in
+    private func chordRow(label: String, chords: [ChordDefinition]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(chords) { chord in
                         ChordDiagramView(chord: chord, stringCount: song.instrument.stringCount)
                     }
                 }
             }
-        } else {
-            HStack(alignment: .top, spacing: 8) {
-                // Chord diagrams for current group
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 4) {
-                        Text("Chords").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        Text("(\(g[safeIdx].label))")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    HStack(alignment: .top, spacing: 16) {
-                        ForEach(g[safeIdx].chords) { chord in
-                            ChordDiagramView(chord: chord, stringCount: song.instrument.stringCount)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 10)
-                            .updating($dragOffset) { value, state, _ in
-                                state = value.translation.height
-                            }
-                            .onEnded { val in
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                                    if val.translation.height < -28 {
-                                        pageIdx = min(pageIdx + 1, g.count - 1)
-                                    } else if val.translation.height > 28 {
-                                        pageIdx = max(pageIdx - 1, 0)
-                                    }
-                                }
-                            }
-                    )
-                }
-
-                // Side difficulty labels — current is always centered in clip area.
-                // Arrows show when there are groups above or below.
-                let canGoUp   = safeIdx > 0
-                let canGoDown = safeIdx < g.count - 1
-                let labelStep: CGFloat = 40   // vertical distance between label centers
-                let clipH: CGFloat = 80       // visible window height
-
-                VStack(spacing: 2) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(canGoUp ? Color.secondary : Color.clear)
-
-                    ZStack {
-                        ForEach(Array(g.enumerated()), id: \.offset) { i, group in
-                            let isCurrent = i == safeIdx
-                            let yOff = CGFloat(i - safeIdx) * labelStep + dragOffset
-
-                            Button {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                                    pageIdx = i
-                                }
-                            } label: {
-                                Text(group.label)
-                                    .font(isCurrent ? .caption.weight(.semibold) : .caption2)
-                                    .foregroundStyle(isCurrent
-                                        ? Color.primary
-                                        : Color.secondary.opacity(0.40))
-                                    .fixedSize()
-                                    .rotationEffect(.degrees(-90))
-                                    .frame(width: 14, height: 38)
-                                    .scaleEffect(isCurrent ? 1.0 : 0.80)
-                            }
-                            .buttonStyle(.plain)
-                            .offset(y: yOff)
-                            .animation(.spring(response: 0.28, dampingFraction: 0.85), value: safeIdx)
-                        }
-                    }
-                    .frame(width: 20, height: clipH)
-                    .clipped()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(canGoDown ? Color.secondary : Color.clear)
-                }
-            }
-        }
-    }
-
-    // MARK: - Strumming section
-
-    // True when every measure in the song uses the same single strumming pattern.
-    private var uniformStrum: Bool {
-        guard song.strummingPatterns.count == 1 else { return false }
-        let pid = song.strummingPatterns[0].id
-        return song.sections.allSatisfy { sec in
-            sec.measures.allSatisfy { $0.strummingPatternId == pid }
         }
     }
 
     @ViewBuilder
     private var strummingSection: some View {
-        if !song.strummingPatterns.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text("Strumming").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    if uniformStrum {
-                        Text("(same throughout)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Strumming")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if uniformStrum {
+                    Text("(same throughout)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                ForEach(song.strummingPatterns) { pattern in
-                    StrummingPatternView(pattern: pattern)
-                }
+            }
+            ForEach(song.strummingPatterns) { pattern in
+                StrummingPatternView(pattern: pattern)
             }
         }
     }
