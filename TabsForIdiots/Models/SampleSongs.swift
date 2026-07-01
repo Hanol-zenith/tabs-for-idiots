@@ -2,14 +2,29 @@ import Foundation
 import SwiftData
 
 struct SampleSongs {
-    // Bumped to V15 — lineGroupSizes added to SongSection; lyric alignment pass.
     static func seedIfNeeded(in context: ModelContext) {
-        let key = "tabsForIdiotsSeededV15"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        try? context.delete(model: Song.self)
-        context.insert(makeSomewhereOverTheRainbow())
-        context.insert(makeRiptide())
-        UserDefaults.standard.set(true, forKey: key)
+        // ── Legacy hand-crafted songs (one-time, never re-runs) ──────────────
+        let v15Key = "tabsForIdiotsSeededV15"
+        if !UserDefaults.standard.bool(forKey: v15Key) {
+            try? context.delete(model: Song.self)
+            context.insert(makeSomewhereOverTheRainbow())
+            context.insert(makeRiptide())
+            UserDefaults.standard.set(true, forKey: v15Key)
+        }
+
+        // ── File-based songs: one .pro file in Songs/ = one insert, ever ────
+        let proKey = "seededProFiles"
+        var seeded = Set((UserDefaults.standard.array(forKey: proKey) as? [String]) ?? [])
+        let urls = Bundle.main.urls(forResourcesWithExtension: "pro", subdirectory: "Songs") ?? []
+        for url in urls {
+            let filename = url.lastPathComponent
+            guard !seeded.contains(filename) else { continue }
+            if let song = ChordProParser.parse(url: url) {
+                context.insert(song)
+                seeded.insert(filename)
+            }
+        }
+        UserDefaults.standard.set(Array(seeded), forKey: proKey)
     }
 
     // MARK: - Somewhere Over the Rainbow
