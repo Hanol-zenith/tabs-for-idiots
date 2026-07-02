@@ -64,7 +64,7 @@ struct FindSongsView: View {
                             if song.isInLibrary {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.title2)
-                                    .foregroundStyle(Color.secondary.opacity(0.4))
+                                    .foregroundStyle(Color.green)
                             } else {
                                 Button {
                                     song.isInLibrary = true

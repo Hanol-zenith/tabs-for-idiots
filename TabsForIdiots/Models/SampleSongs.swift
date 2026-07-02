@@ -4,13 +4,18 @@ import CryptoKit
 
 struct SampleSongs {
     static func seedIfNeeded(in context: ModelContext) {
-        // ── Legacy hand-crafted songs (one-time, never re-runs) ──────────────
-        let v15Key = "tabsForIdiotsSeededV15"
-        if !UserDefaults.standard.bool(forKey: v15Key) {
+        // ── V16: re-seed all songs with isInLibrary = false for correct first-run UX ──
+        let v16Key = "tabsForIdiotsSeededV16"
+        if !UserDefaults.standard.bool(forKey: v16Key) {
             try? context.delete(model: Song.self)
-            context.insert(makeSomewhereOverTheRainbow())
-            context.insert(makeRiptide())
-            UserDefaults.standard.set(true, forKey: v15Key)
+            UserDefaults.standard.removeObject(forKey: "proFileHashes")
+            let sotr = makeSomewhereOverTheRainbow()
+            sotr.isInLibrary = false
+            context.insert(sotr)
+            let riptide = makeRiptide()
+            riptide.isInLibrary = false
+            context.insert(riptide)
+            UserDefaults.standard.set(true, forKey: v16Key)
         }
 
         // ── File-based songs: hash-tracked so edits to .pro files re-seed ───
