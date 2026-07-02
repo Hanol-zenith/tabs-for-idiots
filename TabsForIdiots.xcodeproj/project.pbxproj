@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AABB300000000000000002 /* Songs in Resources */ = {isa = PBXBuildFile; fileRef = AABB300000000000000001 /* Songs */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		AABB000000000000000016 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		AABB000000000000000004 /* TabsForIdiots.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TabsForIdiots.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AABB000000000000000005 /* TabsForIdiotsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TabsForIdiotsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AABB000000000000000006 /* TabsForIdiotsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TabsForIdiotsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AABB300000000000000001 /* Songs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Songs; path = Songs; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -79,6 +84,7 @@
 				AABB000000000000000008 /* TabsForIdiotsTests */,
 				AABB000000000000000009 /* TabsForIdiotsUITests */,
 				AABB000000000000000003 /* Products */,
+				AABB300000000000000001 /* Songs */,
 			);
 			sourceTree = "<group>";
 		};
@@ -212,6 +218,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AABB300000000000000002 /* Songs in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

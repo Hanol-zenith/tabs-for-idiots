@@ -13,6 +13,7 @@ enum DisplayMode: String, CaseIterable {
 
 struct SongDetailView: View {
     let song: Song
+    let readOnly: Bool
 
     @StateObject private var listeningEngine: ListeningEngine
     @StateObject private var tempoEngine: TempoEngine
@@ -49,8 +50,9 @@ struct SongDetailView: View {
     // cannot appear in the new center slot.
     @State private var heardChordBlocked = false
 
-    init(song: Song) {
+    init(song: Song, readOnly: Bool = false) {
         self.song = song
+        self.readOnly = readOnly
         _listeningEngine = StateObject(wrappedValue: ListeningEngine())
         _tempoEngine = StateObject(wrappedValue: TempoEngine())
         let key = song.title
@@ -226,20 +228,22 @@ struct SongDetailView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 14) {
-                    Button(action: { showSettings = true }) {
-                        Image(systemName: "gearshape")
-                            .font(.body)
-                    }
-                    Button(action: toggleListening) {
-                        VStack(spacing: 2) {
-                            Image(systemName: listeningEnabled ? "waveform.circle.fill" : "waveform.circle")
-                                .font(.title3)
-                            Text(listeningEnabled ? "Stop" : "Listen")
-                                .font(.caption2)
+            if !readOnly {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack(spacing: 14) {
+                        Button(action: { showSettings = true }) {
+                            Image(systemName: "gearshape")
+                                .font(.body)
                         }
-                        .foregroundStyle(listeningEnabled ? .red : .primary)
+                        Button(action: toggleListening) {
+                            VStack(spacing: 2) {
+                                Image(systemName: listeningEnabled ? "waveform.circle.fill" : "waveform.circle")
+                                    .font(.title3)
+                                Text(listeningEnabled ? "Stop" : "Listen")
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(listeningEnabled ? .red : .primary)
+                        }
                     }
                 }
             }
@@ -319,11 +323,16 @@ struct SongDetailView: View {
             if !enabled { cancelCleanup() }
         }
         .onAppear {
+            guard !readOnly else { return }
             let now = Date()
             sessionStart = now
-            song.lastPlayedAt = now   // update "recently played" on every open
+            song.lastPlayedAt = now
         }
         .onDisappear {
+            listeningEngine.stop()
+            tempoEngine.stop()
+            cancelCleanup()
+            guard !readOnly else { return }
             UserDefaults.standard.set(currentMeasureIndex, forKey: "measureIndex-\(song.title)")
             if let start = sessionStart {
                 let elapsed = Date().timeIntervalSince(start)
@@ -333,9 +342,6 @@ struct SongDetailView: View {
                 }
                 sessionStart = nil
             }
-            listeningEngine.stop()
-            tempoEngine.stop()
-            cancelCleanup()
         }
         .toolbar(.hidden, for: .tabBar)
     }

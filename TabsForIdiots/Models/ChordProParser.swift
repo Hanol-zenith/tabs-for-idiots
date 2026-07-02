@@ -21,6 +21,12 @@ struct ChordProParser {
         var sections: [ParsedSection] = []
         var current: ParsedSection? = nil
         var pendingChordLine: String? = nil
+        var autoSectionCount = 0
+
+        func nextAutoName() -> String {
+            autoSectionCount += 1
+            return autoSectionCount == 1 ? "Verse" : "Verse \(autoSectionCount)"
+        }
 
         func flushChordLine() {
             guard let cl = pendingChordLine else { return }
@@ -55,12 +61,13 @@ struct ChordProParser {
                 continue
             }
 
-            // Empty line — flush any pending chord line
-            if t.isEmpty { flushChordLine(); continue }
+            // Empty line — close current section so blank lines between verses split sections
+            if t.isEmpty { closeSection(); continue }
 
             // Chord line vs lyric line
             if isChordLine(t) {
                 flushChordLine()
+                if current == nil { current = ParsedSection(name: nextAutoName()) }
                 pendingChordLine = line
             } else {
                 if let cl = pendingChordLine {
@@ -179,7 +186,7 @@ struct ChordProParser {
 
         let lyricChars = Array(lyricLine)
         return positions.enumerated().map { i, item in
-            let start = min(item.col, lyricChars.count)
+            let start = i == 0 ? 0 : min(item.col, lyricChars.count)
             let end   = i + 1 < positions.count ? min(positions[i + 1].col, lyricChars.count) : lyricChars.count
             let fragment = start < end ? String(lyricChars[start..<end]) : ""
             return (item.chord, fragment.trimmingCharacters(in: .whitespaces))

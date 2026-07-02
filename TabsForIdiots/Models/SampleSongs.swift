@@ -20,6 +20,7 @@ struct SampleSongs {
             let filename = url.lastPathComponent
             guard !seeded.contains(filename) else { continue }
             if let song = ChordProParser.parse(url: url) {
+                song.isInLibrary = false
                 context.insert(song)
                 seeded.insert(filename)
             }

@@ -15,6 +15,7 @@ final class Song {
     var lastPlayedAt: Date? = nil
     var playCount: Int = 0          // sessions lasting ≥ 15 seconds
     var totalPracticeSeconds: Double = 0
+    var isInLibrary: Bool = true
 
     var instrument: Instrument {
         get { Instrument(rawValue: instrumentRaw) ?? .ukulele }

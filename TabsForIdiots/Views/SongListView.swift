@@ -11,8 +11,10 @@ enum MySongsSortOrder: String, CaseIterable {
 }
 
 struct SongListView: View {
-    @Query private var allSongs: [Song]
+    @Query(filter: #Predicate<Song> { song in song.isInLibrary == true }) private var allSongs: [Song]
     @AppStorage("mySongsSortOrder") private var sortOrder: String = MySongsSortOrder.recentlyAdded.rawValue
+    @State private var songToDelete: Song? = nil
+    @State private var showDeleteAlert = false
 
     private var currentSort: MySongsSortOrder {
         MySongsSortOrder(rawValue: sortOrder) ?? .recentlyAdded
@@ -50,6 +52,11 @@ struct SongListView: View {
         return "\(max(1, minutes)) min"
     }
 
+    private var deleteAlertMessage: String {
+        guard let song = songToDelete else { return "This song will be removed from My Songs." }
+        return "\"\(song.title)\" will be removed from My Songs. You can re-add it from Find Songs."
+    }
+
     var body: some View {
         List {
             ForEach(songs) { song in
@@ -69,6 +76,14 @@ struct SongListView: View {
                         .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        songToDelete = song
+                        showDeleteAlert = true
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
                 }
             }
         }
@@ -92,6 +107,17 @@ struct SongListView: View {
                     Image(systemName: "line.3.horizontal.decrease.circle")
                 }
             }
+        }
+        .alert("Remove from My Songs?", isPresented: $showDeleteAlert) {
+            Button("Remove", role: .destructive) {
+                songToDelete?.isInLibrary = false
+                songToDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                songToDelete = nil
+            }
+        } message: {
+            Text(deleteAlertMessage)
         }
     }
 }
