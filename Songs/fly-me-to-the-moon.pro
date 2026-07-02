@@ -1,6 +1,8 @@
 {title: Fly Me to the Moon}
 {artist: Frank Sinatra}
 {key: C}
+{strum: Island | D D U U D U}
+{strum: Simple | D D D D}
 
 Am            Dm  
 Fly me to the moon

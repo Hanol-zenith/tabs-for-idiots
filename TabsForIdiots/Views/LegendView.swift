@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LegendView: View {
     let song: Song
+    @Binding var selectedPatternId: UUID?
 
     private struct DGroup: Identifiable {
         let id = UUID()
@@ -47,6 +48,10 @@ struct LegendView: View {
     }
 
     private var uniformStrum: Bool {
+        // All measures have nil strummingPatternId — selected pattern applies throughout
+        let allNil = song.sections.allSatisfy { $0.measures.allSatisfy { $0.strummingPatternId == nil } }
+        if allNil { return true }
+        // All measures explicitly share the same single pattern
         guard song.strummingPatterns.count == 1 else { return false }
         let pid = song.strummingPatterns[0].id
         return song.sections.allSatisfy { $0.measures.allSatisfy { $0.strummingPatternId == pid } }
@@ -91,7 +96,24 @@ struct LegendView: View {
                 }
             }
             ForEach(song.strummingPatterns) { pattern in
-                StrummingPatternView(pattern: pattern)
+                HStack(spacing: 8) {
+                    StrummingPatternView(pattern: pattern)
+                    Spacer()
+                    if song.strummingPatterns.count > 1 {
+                        Button {
+                            selectedPatternId = pattern.id
+                        } label: {
+                            Image(systemName: selectedPatternId == pattern.id
+                                  ? "checkmark.circle.fill"
+                                  : "circle")
+                                .font(.title3)
+                                .foregroundStyle(selectedPatternId == pattern.id
+                                                 ? Color.accentColor
+                                                 : Color.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
             }
         }
     }

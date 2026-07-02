@@ -49,6 +49,7 @@ struct SongDetailView: View {
     // different chord is detected, so the lingering ring of the old chord
     // cannot appear in the new center slot.
     @State private var heardChordBlocked = false
+    @State private var selectedPatternId: UUID? = nil
 
     init(song: Song, readOnly: Bool = false) {
         self.song = song
@@ -60,6 +61,7 @@ struct SongDetailView: View {
         _userTempo = State(initialValue: savedBPM > 0 ? savedBPM : song.tempo)
         let savedEnabled = UserDefaults.standard.object(forKey: "tempoEnabled-\(key)") as? Bool
         _tempoEnabled = State(initialValue: savedEnabled ?? true)
+        _selectedPatternId = State(initialValue: song.strummingPatterns.first?.id)
     }
 
     // MARK: - Computed helpers
@@ -92,9 +94,15 @@ struct SongDetailView: View {
     }
 
     private var currentStrummingPattern: StrummingPattern? {
-        guard let measure = currentMeasure,
-              let id = measure.strummingPatternId else { return nil }
-        return song.strummingPatterns.first(where: { $0.id == id })
+        if let measure = currentMeasure,
+           let id = measure.strummingPatternId,
+           let p = song.strummingPatterns.first(where: { $0.id == id }) {
+            return p
+        }
+        if let selectedId = selectedPatternId {
+            return song.strummingPatterns.first(where: { $0.id == selectedId })
+        }
+        return nil
     }
 
     private var showBottomPanel: Bool {
@@ -125,7 +133,7 @@ struct SongDetailView: View {
     @ViewBuilder
     private var legendSection: some View {
         if legendExpanded {
-            LegendView(song: song)
+            LegendView(song: song, selectedPatternId: $selectedPatternId)
                 .background(.ultraThinMaterial)
                 .transition(.move(edge: .top).combined(with: .opacity))
             Divider()
@@ -319,6 +327,7 @@ struct SongDetailView: View {
             UserDefaults.standard.set(bpm, forKey: "bpm-\(song.title)")
         }
         .onChange(of: currentMeasureIndex) { _, _ in syncTempo() }
+        .onChange(of: selectedPatternId)   { _, _ in syncTempo() }
         .onChange(of: listeningEnabled) { _, enabled in
             if !enabled { cancelCleanup() }
         }

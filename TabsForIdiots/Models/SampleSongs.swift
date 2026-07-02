@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CryptoKit
 
 struct SampleSongs {
     static func seedIfNeeded(in context: ModelContext) {
@@ -12,20 +13,35 @@ struct SampleSongs {
             UserDefaults.standard.set(true, forKey: v15Key)
         }
 
-        // ── File-based songs: one .pro file in Songs/ = one insert, ever ────
-        let proKey = "seededProFiles"
-        var seeded = Set((UserDefaults.standard.array(forKey: proKey) as? [String]) ?? [])
+        // ── File-based songs: hash-tracked so edits to .pro files re-seed ───
+        let hashKey = "proFileHashes"
+        var hashes = (UserDefaults.standard.dictionary(forKey: hashKey) as? [String: String]) ?? [:]
         let urls = Bundle.main.urls(forResourcesWithExtension: "pro", subdirectory: "Songs") ?? []
+
+        let fetchDesc = FetchDescriptor<Song>()
+        let allSongs = (try? context.fetch(fetchDesc)) ?? []
+
         for url in urls {
             let filename = url.lastPathComponent
-            guard !seeded.contains(filename) else { continue }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+
+            if hashes[filename] == hash { continue }
+
+            // Remove stale record (by proSourceFile, or by title for migration)
+            if let old = allSongs.first(where: { $0.proSourceFile == filename })
+                ?? allSongs.first(where: { $0.proSourceFile == "" && ChordProParser.title(of: url) == $0.title }) {
+                context.delete(old)
+            }
+
             if let song = ChordProParser.parse(url: url) {
                 song.isInLibrary = false
+                song.proSourceFile = filename
                 context.insert(song)
-                seeded.insert(filename)
+                hashes[filename] = hash
             }
         }
-        UserDefaults.standard.set(Array(seeded), forKey: proKey)
+        UserDefaults.standard.set(hashes, forKey: hashKey)
     }
 
     // MARK: - Somewhere Over the Rainbow

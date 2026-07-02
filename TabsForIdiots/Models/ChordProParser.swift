@@ -9,6 +9,20 @@ struct ChordProParser {
         return parse(text: text)
     }
 
+    static func title(of url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for line in text.components(separatedBy: .newlines) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix("{"), t.hasSuffix("}") else { continue }
+            let inner = String(t.dropFirst().dropLast())
+            guard let colon = inner.firstIndex(of: ":") else { continue }
+            let key = inner[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let val = inner[inner.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if key == "title" { return val }
+        }
+        return nil
+    }
+
     static func parse(text: String) -> Song? {
         var lines = text.components(separatedBy: .newlines)
 
@@ -90,6 +104,7 @@ struct ChordProParser {
         var artist: String?
         var key: String?
         var tempo: Int?
+        var strummingPatterns: [StrummingPattern] = []
     }
 
     private struct ParsedSection {
@@ -112,8 +127,28 @@ struct ChordProParser {
         case "artist": meta.artist = val
         case "key":    meta.key    = val
         case "tempo":  meta.tempo  = Int(val)
+        case "strum":
+            if let p = parseStrum(val, index: meta.strummingPatterns.count) {
+                meta.strummingPatterns.append(p)
+            }
         default: break
         }
+    }
+
+    // {strum: Island | D D U U D U}
+    private static func parseStrum(_ val: String, index: Int) -> StrummingPattern? {
+        let parts = val.split(separator: "|", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        let name = parts.count == 2 ? parts[0] : "Pattern \(index + 1)"
+        let strokeStr = parts.count == 2 ? parts[1] : parts[0]
+        let strokes: [StrummingPattern.Stroke] = strokeStr.split(separator: " ").compactMap { token in
+            switch token.uppercased() {
+            case "D": return .down
+            case "U": return .up
+            default: return nil
+            }
+        }
+        guard !strokes.isEmpty else { return nil }
+        return StrummingPattern(name: name, strokes: strokes)
     }
 
     // MARK: - Section header detection
@@ -224,7 +259,7 @@ struct ChordProParser {
             tempo:   meta.tempo  ?? 120,
             key:     meta.key    ?? "C",
             chords:  orderedNames.compactMap { defs[$0] },
-            strummingPatterns: [],
+            strummingPatterns: meta.strummingPatterns,
             sections: songSections
         )
     }

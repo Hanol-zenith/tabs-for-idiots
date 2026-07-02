@@ -16,6 +16,7 @@ final class Song {
     var playCount: Int = 0          // sessions lasting ≥ 15 seconds
     var totalPracticeSeconds: Double = 0
     var isInLibrary: Bool = true
+    var proSourceFile: String = ""
 
     var instrument: Instrument {
         get { Instrument(rawValue: instrumentRaw) ?? .ukulele }
