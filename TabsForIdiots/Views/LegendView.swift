@@ -47,16 +47,6 @@ struct LegendView: View {
         return 0
     }
 
-    private var uniformStrum: Bool {
-        // All measures have nil strummingPatternId — selected pattern applies throughout
-        let allNil = song.sections.allSatisfy { $0.measures.allSatisfy { $0.strummingPatternId == nil } }
-        if allNil { return true }
-        // All measures explicitly share the same single pattern
-        guard song.strummingPatterns.count == 1 else { return false }
-        let pid = song.strummingPatterns[0].id
-        return song.sections.allSatisfy { $0.measures.allSatisfy { $0.strummingPatternId == pid } }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !song.chords.isEmpty {
@@ -85,36 +75,19 @@ struct LegendView: View {
     @ViewBuilder
     private var strummingSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("Strumming")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                if uniformStrum {
-                    Text("(same throughout)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            ForEach(song.strummingPatterns) { pattern in
-                HStack(spacing: 8) {
-                    StrummingPatternView(pattern: pattern)
-                    Spacer()
-                    if song.strummingPatterns.count > 1 {
-                        Button {
-                            selectedPatternId = pattern.id
-                        } label: {
-                            Image(systemName: selectedPatternId == pattern.id
-                                  ? "checkmark.circle.fill"
-                                  : "circle")
-                                .font(.title3)
-                                .foregroundStyle(selectedPatternId == pattern.id
-                                                 ? Color.accentColor
-                                                 : Color.secondary)
-                        }
-                        .buttonStyle(.borderless)
+            Text("Strumming")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(song.strummingPatterns) { pattern in
+                        StrummingPatternView(pattern: pattern)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollIndicators(.automatic)
+            .frame(maxHeight: 160)
         }
     }
 }

@@ -218,12 +218,26 @@ struct MeasureCell: View {
         return song.strummingPatterns.first(where: { $0.id == id })
     }
 
+    // Pattern name shown between chord and lyric when song has multiple distinct patterns per measure
+    private var patternName: String? {
+        guard song.strummingPatterns.count > 1,
+              let id = measure.strummingPatternId
+        else { return nil }
+        return song.strummingPatterns.first(where: { $0.id == id })?.name
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(chordName.isEmpty ? " " : chordName)
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.blue)
                 .lineLimit(1)
+            if let name = patternName {
+                Text(name)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isCurrent ? Color.orange : Color.orange.opacity(0.55))
+                    .lineLimit(1)
+            }
             Text(lyricWords.isEmpty ? " " : lyricWords)
                 .font(.system(size: lyricFontSize))
                 .lineLimit(1)

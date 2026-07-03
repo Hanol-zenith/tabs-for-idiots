@@ -386,12 +386,23 @@ struct SongDetailView: View {
                 if listeningEnabled { Divider().padding(.top, 4) }
 
                 if let pattern = currentStrummingPattern {
-                    StrummingMetronomeView(
-                        pattern: pattern,
-                        currentStrokeIndex: tempoEnabled ? tempoEngine.currentStrokeIndex : -1
-                    )
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    VStack(spacing: 2) {
+                        if song.strummingPatterns.count > 1 {
+                            Text(pattern.name)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.top, 4)
+                        }
+                        StrummingMetronomeView(
+                            pattern: pattern,
+                            currentStrokeIndex: tempoEnabled ? tempoEngine.currentStrokeIndex : -1
+                        )
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 6)
+                    }
+                    .id(pattern.id)
                 } else {
                     Text("No strumming pattern for this section")
                         .font(.caption)

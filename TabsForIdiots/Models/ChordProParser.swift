@@ -23,8 +23,92 @@ struct ChordProParser {
         return nil
     }
 
+    // MARK: - OpenClaw format pre-processor
+    // Handles two OpenClaw conventions so the main parser can work with them:
+    //   • "Strumming Patterns:" block → {strum:} directives
+    //   • Pattern-name annotation lines → {pattern:} directives (| separated for multi-word names)
+    //   • ∆7 → maj7 normalisation (jazz delta major-7 symbol)
+    private static func preprocess(_ text: String) -> String {
+        // Normalise ∆7 (U+2206, mathematical delta = major 7 in jazz) → maj7
+        let text = text.replacingOccurrences(of: "\u{2206}7", with: "maj7")
+
+        let rawLines = text.components(separatedBy: .newlines)
+
+        // Pass 1: extract named pattern definitions from "Strumming Patterns:" block
+        var patternNames = Set<String>()
+        var strumDirectives: [String] = []
+        var inStrumBlock = false
+        var strumLineIndices = Set<Int>()
+
+        for (i, line) in rawLines.enumerated() {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.lowercased().hasPrefix("strumming pattern") && t.hasSuffix(":") {
+                inStrumBlock = true
+                strumLineIndices.insert(i)
+                continue
+            }
+            if inStrumBlock {
+                if t.isEmpty { inStrumBlock = false; continue }
+                if let colon = t.firstIndex(of: ":") {
+                    let name = String(t[..<colon]).trimmingCharacters(in: .whitespaces)
+                    let strokes = String(t[t.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+                    patternNames.insert(name)
+                    strumDirectives.append("{strum: \(name) | \(strokes)}")
+                    strumLineIndices.insert(i)
+                } else {
+                    inStrumBlock = false
+                }
+            }
+        }
+
+        guard !patternNames.isEmpty else { return text }
+
+        // Greedy left-to-right match of a string against known (possibly multi-word) pattern names.
+        // Returns the matched sequence or nil if the string contains non-pattern tokens.
+        let sortedNames = patternNames.sorted { $0.count > $1.count }
+        func greedyMatchPatterns(_ s: String) -> [String]? {
+            var result: [String] = []
+            var rem = s
+            while !rem.isEmpty {
+                var matched = false
+                for name in sortedNames {
+                    if rem == name {
+                        result.append(name); rem = ""; matched = true; break
+                    }
+                    if rem.hasPrefix(name + " ") {
+                        result.append(name)
+                        rem = String(rem.dropFirst(name.count + 1))
+                        matched = true; break
+                    }
+                }
+                if !matched { return nil }
+            }
+            return result.isEmpty ? nil : result
+        }
+
+        // Pass 2: rebuild, removing strum-block lines; converting annotation lines to {pattern:}
+        // Pattern names are joined with | to preserve multi-word names (e.g. "2 Strum").
+        var result: [String] = []
+        var lastMetaIdx = -1
+
+        for (i, line) in rawLines.enumerated() {
+            if strumLineIndices.contains(i) { continue }
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if !t.isEmpty, let patterns = greedyMatchPatterns(t) {
+                result.append("{pattern: \(patterns.joined(separator: "|"))}")
+                continue
+            }
+            result.append(line)
+            if t.hasPrefix("{") && t.hasSuffix("}") { lastMetaIdx = result.count - 1 }
+        }
+
+        let insertAt = lastMetaIdx >= 0 ? lastMetaIdx + 1 : 0
+        result.insert(contentsOf: strumDirectives, at: min(insertAt, result.count))
+        return result.joined(separator: "\n")
+    }
+
     static func parse(text: String) -> Song? {
-        var lines = text.components(separatedBy: .newlines)
+        var lines = preprocess(text).components(separatedBy: .newlines)
 
         // Strip ukutabs.com disclaimer
         if let cut = lines.firstIndex(where: { $0.contains("contributor's own interpretation") }) {
@@ -60,6 +144,25 @@ struct ChordProParser {
 
             // Metadata: {key: value}
             if t.hasPrefix("{"), t.hasSuffix("}") {
+                let inner = String(t.dropFirst().dropLast())
+                if let colon = inner.firstIndex(of: ":") {
+                    let key = inner[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+                    let val = inner[inner.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                    if key == "pattern" {
+                        // Assign named patterns to the last N measures in the current section.
+                        // Names are | separated to support multi-word patterns like "2 Strum".
+                        flushChordLine()
+                        let tokens = val.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                        if var sec = current, !tokens.isEmpty {
+                            let n = min(tokens.count, sec.chords.count)
+                            let base = sec.chords.count - n
+                            while sec.patternAssignments.count < sec.chords.count { sec.patternAssignments.append(nil) }
+                            for i in 0..<n { sec.patternAssignments[base + i] = tokens[i] }
+                            current = sec
+                        }
+                        continue
+                    }
+                }
                 parseMeta(t, into: &meta)
                 continue
             }
@@ -79,7 +182,18 @@ struct ChordProParser {
             if t.isEmpty { closeSection(); continue }
 
             // Chord line vs lyric line
-            if isChordLine(t) {
+            // Paren format: (Chord)lyric text (Chord2)lyric text — chords and lyrics on same line
+            if isParenChordLine(t) {
+                flushChordLine()
+                if current == nil { current = ParsedSection(name: nextAutoName()) }
+                if let pairs = extractParenPairs(line: t), !pairs.isEmpty {
+                    for (ch, lyr) in pairs {
+                        current!.chords.append(ch)
+                        current!.lyrics.append(lyr)
+                    }
+                    current!.lineGroupSizes.append(pairs.count)
+                }
+            } else if isChordLine(t) {
                 flushChordLine()
                 if current == nil { current = ParsedSection(name: nextAutoName()) }
                 pendingChordLine = line
@@ -112,6 +226,7 @@ struct ChordProParser {
         var chords: [String] = []
         var lyrics: [String] = []
         var lineGroupSizes: [Int] = []
+        var patternAssignments: [String?] = []  // parallel to chords/lyrics; nil = no assignment
     }
 
     // MARK: - Metadata parsing
@@ -126,7 +241,7 @@ struct ChordProParser {
         case "title":  meta.title  = val
         case "artist": meta.artist = val
         case "key":    meta.key    = val
-        case "tempo":  meta.tempo  = Int(val)
+        case "tempo":  meta.tempo  = val.components(separatedBy: .whitespaces).first.flatMap { Int($0) }
         case "strum":
             if let p = parseStrum(val, index: meta.strummingPatterns.count) {
                 meta.strummingPatterns.append(p)
@@ -170,6 +285,50 @@ struct ChordProParser {
         guard afterTokens.isEmpty || afterTokens.allSatisfy({ isChordToken($0) }) else { return nil }
 
         return (before, afterTokens)
+    }
+
+    // MARK: - Paren chord line detection (inline format: (Chord)lyric text)
+
+    private static func isParenChordLine(_ t: String) -> Bool {
+        guard t.contains("(") else { return false }
+        var i = t.startIndex
+        while i < t.endIndex {
+            if t[i] == "(" {
+                let afterOpen = t.index(after: i)
+                if let closeIdx = t[afterOpen...].firstIndex(of: ")") {
+                    let inner = String(t[afterOpen..<closeIdx]).trimmingCharacters(in: .whitespaces)
+                    if isChordToken(inner) { return true }
+                    i = t.index(after: closeIdx)
+                } else { break }
+            } else { i = t.index(after: i) }
+        }
+        return false
+    }
+
+    // Extract (chord, lyric) pairs from an inline paren-format line.
+    // Each chord's lyric runs from after its ) to the opening ( of the next chord.
+    private static func extractParenPairs(line: String) -> [(chord: String, lyric: String)]? {
+        var positions: [(chord: String, openIdx: String.Index, endIdx: String.Index)] = []
+        var i = line.startIndex
+        while i < line.endIndex {
+            if line[i] == "(" {
+                let afterOpen = line.index(after: i)
+                if let closeIdx = line[afterOpen...].firstIndex(of: ")") {
+                    let chordStr = String(line[afterOpen..<closeIdx]).trimmingCharacters(in: .whitespaces)
+                    if isChordToken(chordStr) {
+                        positions.append((chord: chordStr, openIdx: i, endIdx: line.index(after: closeIdx)))
+                    }
+                    i = line.index(after: closeIdx)
+                } else { i = line.index(after: i) }
+            } else { i = line.index(after: i) }
+        }
+        guard !positions.isEmpty else { return nil }
+        return positions.enumerated().map { idx, pos in
+            let lyricStart = pos.endIdx
+            let lyricEnd = idx + 1 < positions.count ? positions[idx + 1].openIdx : line.endIndex
+            let lyric = lyricStart < lyricEnd ? String(line[lyricStart..<lyricEnd]).trimmingCharacters(in: .whitespaces) : ""
+            return (chord: pos.chord, lyric: lyric)
+        }
     }
 
     // MARK: - Chord line detection
@@ -246,8 +405,13 @@ struct ChordProParser {
 
         // Build sections
         let songSections: [SongSection] = sections.map { ps in
-            let measures = zip(ps.chords, ps.lyrics).map { ch, lyr in
-                SongMeasure(chordId: defs[ch]?.id, lyric: lyr)
+            let measures = zip(ps.chords, ps.lyrics).enumerated().map { idx, pair in
+                let (ch, lyr) = pair
+                let patternName = idx < ps.patternAssignments.count ? ps.patternAssignments[idx] : nil
+                let patternId = patternName.flatMap { name in
+                    meta.strummingPatterns.first { $0.name == name }?.id
+                }
+                return SongMeasure(chordId: defs[ch]?.id, strummingPatternId: patternId, lyric: lyr)
             }
             return SongSection(name: ps.name, measures: Array(measures), lineGroupSizes: ps.lineGroupSizes)
         }

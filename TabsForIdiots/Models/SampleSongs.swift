@@ -18,6 +18,31 @@ struct SampleSongs {
             UserDefaults.standard.set(true, forKey: v16Key)
         }
 
+        // ── V17: add Half the World Away with per-measure strumming patterns ──
+        let v17Key = "tabsForIdiotsSeededV17"
+        if !UserDefaults.standard.bool(forKey: v17Key) {
+            let htwa = makeHalfTheWorldAway()
+            htwa.isInLibrary = false
+            context.insert(htwa)
+            UserDefaults.standard.set(true, forKey: v17Key)
+        }
+
+        // ── V18: replace hand-coded HTWA with the .pro-parsed version ──────
+        let v18Key = "tabsForIdiotsSeededV18"
+        if !UserDefaults.standard.bool(forKey: v18Key) {
+            let fetchAll = FetchDescriptor<Song>()
+            let all = (try? context.fetch(fetchAll)) ?? []
+            // Delete the hand-coded record (no .pro source file, title matches)
+            for song in all where song.proSourceFile == "" && song.title.lowercased() == "half the world away" {
+                context.delete(song)
+            }
+            // Clear the stored hash so the .pro file is forced to re-seed
+            var hashes = (UserDefaults.standard.dictionary(forKey: "proFileHashes") as? [String: String]) ?? [:]
+            hashes.removeValue(forKey: "half-the-world-away.pro")
+            UserDefaults.standard.set(hashes, forKey: "proFileHashes")
+            UserDefaults.standard.set(true, forKey: v18Key)
+        }
+
         // ── File-based songs: hash-tracked so edits to .pro files re-seed ───
         let hashKey = "proFileHashes"
         var hashes = (UserDefaults.standard.dictionary(forKey: hashKey) as? [String: String]) ?? [:]
@@ -257,6 +282,95 @@ struct SampleSongs {
             chords: [amChord, gChord, cChord],
             strummingPatterns: [pattern],
             sections: [intro, verse1, preChorus, chorus]
+        )
+    }
+
+    // MARK: - Half the World Away
+
+    private static func makeHalfTheWorldAway() -> Song {
+        let cChord  = ChordDefinition(name: "C",  frets: [0,0,0,3], fingers: [0,0,0,3])
+        let amChord = ChordDefinition(name: "Am", frets: [2,0,0,0], fingers: [2,0,0,0])
+        let fChord  = ChordDefinition(name: "F",  frets: [2,0,1,0], fingers: [2,0,1,0])
+        let gChord  = ChordDefinition(name: "G",  frets: [0,2,3,2], fingers: [0,1,3,2])
+
+        let verse  = StrummingPattern(name: "Verse",  strokes: [.down, .up, .down, .up])
+        let chorus = StrummingPattern(name: "Chorus", strokes: [.down, .down, .up, .up, .down, .up])
+
+        func v(_ chord: ChordDefinition, _ lyric: String) -> SongMeasure {
+            SongMeasure(chordId: chord.id, strummingPatternId: verse.id, lyric: lyric)
+        }
+        func c(_ chord: ChordDefinition, _ lyric: String) -> SongMeasure {
+            SongMeasure(chordId: chord.id, strummingPatternId: chorus.id, lyric: lyric)
+        }
+
+        let intro = SongSection(name: "Intro", measures: [
+            v(cChord, ""), v(amChord, ""), v(cChord, ""), v(amChord, ""),
+        ], lineGroupSizes: [4])
+
+        let verse1 = SongSection(name: "Verse 1", measures: [
+            v(cChord,  "I would like to"),
+            v(amChord, "leave this city,"),
+            v(cChord,  "this old town don't"),
+            v(amChord, "smell too pretty and"),
+            v(cChord,  "I can feel the"),
+            v(amChord, "warning signs"),
+            v(fChord,  "running around"),
+            v(gChord,  "my mind"),
+        ], lineGroupSizes: [4, 4])
+
+        let verse2 = SongSection(name: "Verse 2", measures: [
+            v(cChord,  "And everything I"),
+            v(amChord, "do it just comes"),
+            v(cChord,  "undone, and every-"),
+            v(amChord, "-thing I've done"),
+            v(cChord,  "is right or wrong"),
+            v(amChord, "I don't know where"),
+            v(fChord,  "I belong,"),
+            v(gChord,  "nah nah nah"),
+        ], lineGroupSizes: [4, 4])
+
+        let chorus1 = SongSection(name: "Chorus", measures: [
+            c(amChord, "Half the world a-"),
+            c(cChord,  "-way,"),
+            c(fChord,  "half the world a-"),
+            c(gChord,  "-way,"),
+            c(amChord, "half the world a-"),
+            c(cChord,  "-way,"),
+            c(fChord,  "I've been lost, I've"),
+            c(gChord,  "been found"),
+        ], lineGroupSizes: [4, 4])
+
+        let verse3 = SongSection(name: "Verse 3", measures: [
+            v(cChord,  "I'd like to leave,"),
+            v(amChord, "I don't know why,"),
+            v(cChord,  "I've been fighting"),
+            v(amChord, "all this time and"),
+            v(cChord,  "I can't explain"),
+            v(amChord, "the reasons why"),
+            v(fChord,  "I've gotta leave"),
+            v(gChord,  "this life behind"),
+        ], lineGroupSizes: [4, 4])
+
+        let chorus2 = SongSection(name: "Chorus 2", measures: [
+            c(amChord, "Half the world a-"),
+            c(cChord,  "-way,"),
+            c(fChord,  "half the world a-"),
+            c(gChord,  "-way,"),
+            c(amChord, "half the world a-"),
+            c(cChord,  "-way,"),
+            c(fChord,  "I've been lost, I've"),
+            c(gChord,  "been found"),
+        ], lineGroupSizes: [4, 4])
+
+        return Song(
+            title: "Half the World Away",
+            artist: "Oasis",
+            instrument: .ukulele,
+            tempo: 68,
+            key: "C",
+            chords: [cChord, amChord, fChord, gChord],
+            strummingPatterns: [verse, chorus],
+            sections: [intro, verse1, verse2, chorus1, verse3, chorus2]
         )
     }
 }
