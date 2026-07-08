@@ -28,6 +28,22 @@ struct StrummingPattern: Codable, Identifiable, Hashable {
         var isDown: Bool { self == .down || self == .downMuted }
     }
 
+    // Whether the gap AFTER each stroke (except the last) should render as the
+    // "long" tier vs the "short" tier, derived from `intervals`. All `false`
+    // when there's no real short/long distinction (empty or uniform
+    // intervals), so callers can fall back to a single default gap.
+    var longGapAfter: [Bool] {
+        guard intervals.count == strokes.count, strokes.count > 1 else {
+            return Array(repeating: false, count: max(strokes.count - 1, 0))
+        }
+        let distinct = Array(Set(intervals)).sorted()
+        guard let lo = distinct.first, let hi = distinct.last, lo != hi else {
+            return Array(repeating: false, count: strokes.count - 1)
+        }
+        let threshold = (lo + hi) / 2
+        return intervals.dropLast().map { $0 > threshold }
+    }
+
     init(id: UUID = UUID(), name: String, strokes: [Stroke], intervals: [Double] = []) {
         self.id = id
         self.name = name

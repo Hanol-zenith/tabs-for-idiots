@@ -263,21 +263,76 @@ struct ChordProParser {
     }
 
     // {strum: Island | D D U U D U}
+    //
+    // Also supports bar notation, where column spacing carries rhythm:
+    // {strum: Everyman | |D    D U    U D U |}
+    // The number of characters between one stroke and the next becomes that
+    // stroke's relative duration (a wide gap = a longer hold), and a gap
+    // before the first stroke becomes a leading pause. Plain space-separated
+    // lists (no leading "|") keep the old equal-spacing behavior.
     private static func parseStrum(_ val: String, index: Int) -> StrummingPattern? {
         let parts = val.split(separator: "|", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
         let name = parts.count == 2 ? parts[0] : "Pattern \(index + 1)"
-        let strokeStr = parts.count == 2 ? parts[1] : parts[0]
-        // Bar characters ("|") may be glued directly to a stroke letter (e.g. "|D    D U |")
-        // as column-alignment notation; strip them so they never swallow that stroke.
-        let strokes: [StrummingPattern.Stroke] = strokeStr.replacingOccurrences(of: "|", with: " ").split(separator: " ").compactMap { token in
-            switch token.uppercased() {
-            case "D": return .down
-            case "U": return .up
-            default: return nil
+        var strokeStr = parts.count == 2 ? parts[1] : parts[0]
+
+        guard strokeStr.hasPrefix("|") else {
+            let strokes: [StrummingPattern.Stroke] = strokeStr.split(separator: " ").compactMap { token in
+                switch token.uppercased() {
+                case "D": return .down
+                case "U": return .up
+                default: return nil
+                }
+            }
+            guard !strokes.isEmpty else { return nil }
+            return StrummingPattern(name: name, strokes: strokes)
+        }
+
+        // Bar notation: drop the enclosing "|" characters but keep every
+        // interior space, since their exact column positions are the rhythm.
+        strokeStr.removeFirst()
+        if strokeStr.hasSuffix("|") { strokeStr.removeLast() }
+        let chars = Array(strokeStr)
+        guard chars.contains(where: { "DUdu".contains($0) }) else { return nil }
+
+        var strokes: [StrummingPattern.Stroke] = []
+        var positions: [Int] = []
+        if let firstStrokeIdx = chars.firstIndex(where: { "DUdu".contains($0) }), firstStrokeIdx > 0 {
+            strokes.append(.pause)
+            positions.append(0)
+        }
+        for (i, ch) in chars.enumerated() {
+            switch String(ch).uppercased() {
+            case "D": strokes.append(.down); positions.append(i)
+            case "U": strokes.append(.up); positions.append(i)
+            default: break
             }
         }
-        guard !strokes.isEmpty else { return nil }
-        return StrummingPattern(name: name, strokes: strokes)
+
+        // Each stroke's raw duration is its column distance to the next stroke
+        // (or to the end of the bar). Rather than using that literal distance
+        // directly (which can produce an arbitrarily extreme ratio depending
+        // on incidental padding, e.g. trailing spaces before a closing "|"),
+        // bucket it into two tiers at a fixed 1:2 ratio — strokes written
+        // close together ("grouped") all get the same short duration, strokes
+        // written far apart ("spaced out") all get the same long duration —
+        // then normalize to one 4/4 measure.
+        let rawDurations: [Double] = positions.enumerated().map { idx, pos in
+            let end = idx + 1 < positions.count ? positions[idx + 1] : chars.count
+            return Double(end - pos)
+        }
+        let minDur = rawDurations.min() ?? 0
+        let maxDur = rawDurations.max() ?? 0
+        let bucketed: [Double]
+        if minDur == maxDur {
+            bucketed = rawDurations
+        } else {
+            let mid = (minDur + maxDur) / 2
+            bucketed = rawDurations.map { $0 <= mid ? 1.0 : 2.0 }
+        }
+        let total = bucketed.reduce(0, +)
+        let intervals = total > 0 ? bucketed.map { $0 / total * 4.0 } : []
+
+        return StrummingPattern(name: name, strokes: strokes, intervals: intervals)
     }
 
     // MARK: - Repeated-chord ("Ex2") expansion

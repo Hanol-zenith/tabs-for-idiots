@@ -838,25 +838,59 @@ struct StrummingMetronomeView: View {
     let pattern: StrummingPattern
     let currentStrokeIndex: Int
 
+    // Fixed absolute sizes, not proportional to the row's available width —
+    // grouped strums always sit `shortGap` apart, spread-out strums always
+    // sit `longGap` apart. Patterns without a real short/long distinction
+    // (no bar-notation spacing) fall back to the original uniform spacing.
+    private let strokeWidth: CGFloat = 40
+    private let defaultGap: CGFloat = 12
+    private let shortGap: CGFloat = 6
+    private let longGap: CGFloat = 22
+
+    private func gapWidth(afterIndex idx: Int, longAfter: [Bool]) -> CGFloat {
+        guard longAfter.contains(true) else { return defaultGap }
+        return longAfter[idx] ? longGap : shortGap
+    }
+
+    // A pause is a lead-in rest, not a strike — render it as plain empty
+    // space (no symbol, no label, no highlight) rather than a "·"/"-" glyph.
+    @ViewBuilder
+    private func strokeContent(_ stroke: StrummingPattern.Stroke, active: Bool) -> some View {
+        if stroke == .pause {
+            Color.clear
+        } else {
+            VStack(spacing: 2) {
+                Text(stroke.symbol)
+                    .font(.system(size: active ? 26 : 20))
+                    .foregroundStyle(active ? Color.orange : (stroke.isDown ? Color.primary : Color.blue))
+                Text(stroke.rawValue)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(active ? Color.orange : Color.secondary)
+            }
+            .padding(.vertical, 6)
+            .background(active ? Color.orange.opacity(0.2) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
     var body: some View {
+        let longAfter = pattern.longGapAfter
         HStack(spacing: 0) {
             ForEach(Array(pattern.strokes.enumerated()), id: \.offset) { idx, stroke in
                 let active = idx == currentStrokeIndex
-                VStack(spacing: 2) {
-                    Text(stroke.symbol)
-                        .font(.system(size: active ? 26 : 20))
-                        .foregroundStyle(active ? Color.orange : (stroke.isDown ? Color.primary : Color.blue))
-                    Text(stroke.rawValue)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(active ? Color.orange : Color.secondary)
+                // A pause has no glyph of its own; giving it a full stroke-width
+                // column too would make the lead-in gap wider than a same-tier
+                // gap between two real strokes, so it collapses to width 0 and
+                // the gap after it is the only space rendered.
+                strokeContent(stroke, active: active)
+                    .frame(width: stroke == .pause ? 0 : strokeWidth)
+                    .animation(.easeInOut(duration: 0.07), value: currentStrokeIndex)
+                if idx < pattern.strokes.count - 1 {
+                    Spacer().frame(width: gapWidth(afterIndex: idx, longAfter: longAfter))
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(active ? Color.orange.opacity(0.2) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .animation(.easeInOut(duration: 0.07), value: currentStrokeIndex)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

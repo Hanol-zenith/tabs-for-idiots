@@ -8,7 +8,7 @@ struct SampleSongs {
     // so a version bump forces every .pro song to re-parse on next launch —
     // even though the .pro files themselves didn't change — instead of hand-
     // rolling a one-off migration block (like V19 below) per parser fix.
-    private static let parserVersion = 1
+    private static let parserVersion = 2
 
     static func seedIfNeeded(in context: ModelContext) {
         // ── V16: re-seed all songs with isInLibrary = false for correct first-run UX ──
