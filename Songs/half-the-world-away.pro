@@ -4,16 +4,14 @@
 {tempo: 116 bpm}
 
 Strumming Patterns:
-Everyman: D D U U D U
-Bouncer: D D U D D U
-Passenger: U D U U D U
-2 Strum: D D
+Everyman: |D    D U    U D U |
+Bouncer: |D    D U D    D U |
+Passenger: |     U D U    U D U |
+2 Strum: |D    D                 |
 
 Intro:
-(C) (F∆7)
-Everyman Everyman
-(C) (F∆7)
-Everyman Everyman
+(C)(F∆7)
+(C)(F∆7)
 
 Verse 1:
 (C) I would like to (F∆7) leave this city,
@@ -44,7 +42,8 @@ Everyman
 Passenger
 (Fm) half the world away,
 Everyman
-(Fm) Passenger
+(Fm) half the world away,
+Passenger
 (C) half the (Am) world away
 Bouncer Everyman
 (D) I've been lost, I've been found
@@ -81,7 +80,8 @@ Everyman
 Passenger
 (Fm) half the world away,
 Everyman
-(Fm) Passenger
+(Fm) half the world away,
+Passenger
 (C) half the (Am) world away
 Bouncer Everyman
 (D) I've been lost, I've been found
@@ -90,13 +90,9 @@ Everyman
 Everyman Passenger Everyman 2 Strum
 
 Outro:
-(C) (F∆7)
-Everyman Everyman
-(C) (F∆7)
-Everyman Everyman
-(C) (F∆7)
-Everyman Everyman
-(C) (F∆7)
-Everyman Everyman
+(C)(F∆7)
+(C)(F∆7)
+(C)(F∆7)
+(C)(F∆7)
 
 This arrangement is its contributor's own interpretation, shared for private study, education and non-commercial use. The underlying song, lyrics and music remain the property of their copyright owners.
