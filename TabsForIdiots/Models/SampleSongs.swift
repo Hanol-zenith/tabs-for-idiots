@@ -3,6 +3,13 @@ import SwiftData
 import CryptoKit
 
 struct SampleSongs {
+    // Bump whenever ChordProParser's parsing logic changes materially. The
+    // hash-tracked re-seed loop below folds this into each file's stored hash,
+    // so a version bump forces every .pro song to re-parse on next launch —
+    // even though the .pro files themselves didn't change — instead of hand-
+    // rolling a one-off migration block (like V19 below) per parser fix.
+    private static let parserVersion = 1
+
     static func seedIfNeeded(in context: ModelContext) {
         // ── V16: re-seed all songs with isInLibrary = false for correct first-run UX ──
         let v16Key = "tabsForIdiotsSeededV16"
@@ -69,7 +76,8 @@ struct SampleSongs {
         for url in urls {
             let filename = url.lastPathComponent
             guard let data = try? Data(contentsOf: url) else { continue }
-            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let rawHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let hash = "\(parserVersion):\(rawHash)"
 
             if hashes[filename] == hash { continue }
 

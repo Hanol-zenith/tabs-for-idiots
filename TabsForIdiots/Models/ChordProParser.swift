@@ -39,22 +39,30 @@ struct ChordProParser {
         var strumDirectives: [String] = []
         var inStrumBlock = false
         var strumLineIndices = Set<Int>()
+        var sawPatternInBlock = false
 
         for (i, line) in rawLines.enumerated() {
             let t = line.trimmingCharacters(in: .whitespaces)
             if t.lowercased().hasPrefix("strumming pattern") && t.hasSuffix(":") {
                 inStrumBlock = true
+                sawPatternInBlock = false
                 strumLineIndices.insert(i)
                 continue
             }
             if inStrumBlock {
-                if t.isEmpty { inStrumBlock = false; continue }
+                // Tolerate a blank line before the first entry (a stylistic gap
+                // after the header); a blank line after at least one entry ends the block.
+                if t.isEmpty {
+                    if sawPatternInBlock { inStrumBlock = false }
+                    continue
+                }
                 if let colon = t.firstIndex(of: ":") {
                     let name = String(t[..<colon]).trimmingCharacters(in: .whitespaces)
                     let strokes = String(t[t.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
                     patternNames.insert(name)
                     strumDirectives.append("{strum: \(name) | \(strokes)}")
                     strumLineIndices.insert(i)
+                    sawPatternInBlock = true
                 } else {
                     inStrumBlock = false
                 }
@@ -259,7 +267,9 @@ struct ChordProParser {
         let parts = val.split(separator: "|", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
         let name = parts.count == 2 ? parts[0] : "Pattern \(index + 1)"
         let strokeStr = parts.count == 2 ? parts[1] : parts[0]
-        let strokes: [StrummingPattern.Stroke] = strokeStr.split(separator: " ").compactMap { token in
+        // Bar characters ("|") may be glued directly to a stroke letter (e.g. "|D    D U |")
+        // as column-alignment notation; strip them so they never swallow that stroke.
+        let strokes: [StrummingPattern.Stroke] = strokeStr.replacingOccurrences(of: "|", with: " ").split(separator: " ").compactMap { token in
             switch token.uppercased() {
             case "D": return .down
             case "U": return .up
