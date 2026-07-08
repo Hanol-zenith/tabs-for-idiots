@@ -80,19 +80,29 @@ struct SampleSongs {
             let hash = "\(parserVersion):\(rawHash)"
 
             if hashes[filename] == hash { continue }
+            guard let parsed = ChordProParser.parse(url: url) else { continue }
 
-            // Remove stale record (by proSourceFile, or by title for migration)
-            if let old = allSongs.first(where: { $0.proSourceFile == filename })
+            // Match an existing record (by proSourceFile, or by title for the
+            // one-time hand-coded → .pro migration) and update its content in
+            // place, rather than delete-and-recreate, so library membership,
+            // play count, and practice history survive editing the .pro file.
+            if let existing = allSongs.first(where: { $0.proSourceFile == filename })
                 ?? allSongs.first(where: { $0.proSourceFile == "" && ChordProParser.title(of: url) == $0.title }) {
-                context.delete(old)
+                existing.title = parsed.title
+                existing.artist = parsed.artist
+                existing.instrumentRaw = parsed.instrumentRaw
+                existing.tempo = parsed.tempo
+                existing.key = parsed.key
+                existing.chordsJSON = parsed.chordsJSON
+                existing.strummingPatternsJSON = parsed.strummingPatternsJSON
+                existing.sectionsJSON = parsed.sectionsJSON
+                existing.proSourceFile = filename
+            } else {
+                parsed.isInLibrary = false
+                parsed.proSourceFile = filename
+                context.insert(parsed)
             }
-
-            if let song = ChordProParser.parse(url: url) {
-                song.isInLibrary = false
-                song.proSourceFile = filename
-                context.insert(song)
-                hashes[filename] = hash
-            }
+            hashes[filename] = hash
         }
         UserDefaults.standard.set(hashes, forKey: hashKey)
     }

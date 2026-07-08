@@ -4,6 +4,14 @@ struct LegendView: View {
     let song: Song
     @Binding var selectedPatternId: UUID?
 
+    // A bare ScrollView inside a VStack expands to fill its maxHeight cap
+    // regardless of how little content it holds, which wastes space for
+    // songs with few chords/patterns. Measuring the actual content height
+    // and clamping to the smaller of that and the cap fixes it.
+    @State private var chordsContentHeight: CGFloat = 0
+    @State private var strumContentHeight: CGFloat = 0
+    private let sectionMaxHeight: CGFloat = 160
+
     private struct DGroup: Identifiable {
         let id = UUID()
         let difficulty: ChordDifficulty
@@ -58,9 +66,10 @@ struct LegendView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .measureHeight($chordsContentHeight)
                 }
                 .scrollIndicators(.hidden)
-                .frame(maxHeight: 160)
+                .frame(height: min(chordsContentHeight, sectionMaxHeight))
             }
 
             if !song.strummingPatterns.isEmpty {
@@ -85,10 +94,31 @@ struct LegendView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .measureHeight($strumContentHeight)
             }
             .scrollIndicators(.automatic)
-            .frame(maxHeight: 160)
+            .frame(height: min(strumContentHeight, sectionMaxHeight))
         }
+    }
+}
+
+// Reports a view's rendered height up through the view tree, so a parent can
+// size a ScrollView to its actual content instead of a fixed cap.
+private struct HeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    func measureHeight(_ height: Binding<CGFloat>) -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: HeightPreferenceKey.self, value: geo.size.height)
+            }
+        )
+        .onPreferenceChange(HeightPreferenceKey.self) { height.wrappedValue = $0 }
     }
 }
 
