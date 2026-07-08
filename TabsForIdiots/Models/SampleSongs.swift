@@ -3,12 +3,13 @@ import SwiftData
 import CryptoKit
 
 struct SampleSongs {
-    // Bump whenever ChordProParser's parsing logic changes materially. The
-    // hash-tracked re-seed loop below folds this into each file's stored hash,
-    // so a version bump forces every .pro song to re-parse on next launch —
-    // even though the .pro files themselves didn't change — instead of hand-
-    // rolling a one-off migration block (like V19 below) per parser fix.
-    private static let parserVersion = 2
+    // Bump whenever ChordProParser's parsing logic or UkuleleChords' chord
+    // data changes materially. The hash-tracked re-seed loop below folds this
+    // into each file's stored hash, so a version bump forces every .pro song
+    // to re-parse on next launch — even though the .pro files themselves
+    // didn't change — instead of hand-rolling a one-off migration block
+    // (like V19 below) per fix.
+    private static let parserVersion = 3
 
     static func seedIfNeeded(in context: ModelContext) {
         // ── V16: re-seed all songs with isInLibrary = false for correct first-run UX ──
