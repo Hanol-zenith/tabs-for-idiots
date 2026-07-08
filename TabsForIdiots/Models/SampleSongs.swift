@@ -43,6 +43,21 @@ struct SampleSongs {
             UserDefaults.standard.set(true, forKey: v18Key)
         }
 
+        // ── V19: re-seed Ob-La-Di after bracket-group / xN-repeat parser fix ──
+        let v19Key = "tabsForIdiotsSeededV19"
+        if !UserDefaults.standard.bool(forKey: v19Key) {
+            let fetchAll = FetchDescriptor<Song>()
+            let all = (try? context.fetch(fetchAll)) ?? []
+            for song in all where song.proSourceFile == "ob-la-di-ob-la-da.pro" {
+                context.delete(song)
+            }
+            // Clear the stored hash so the .pro file is forced to re-seed
+            var hashes = (UserDefaults.standard.dictionary(forKey: "proFileHashes") as? [String: String]) ?? [:]
+            hashes.removeValue(forKey: "ob-la-di-ob-la-da.pro")
+            UserDefaults.standard.set(hashes, forKey: "proFileHashes")
+            UserDefaults.standard.set(true, forKey: v19Key)
+        }
+
         // ── File-based songs: hash-tracked so edits to .pro files re-seed ───
         let hashKey = "proFileHashes"
         var hashes = (UserDefaults.standard.dictionary(forKey: hashKey) as? [String: String]) ?? [:]

@@ -115,6 +115,8 @@ struct ChordProParser {
             lines = Array(lines[..<cut])
         }
 
+        lines = expandRepeatedChords(lines)
+
         var meta = Meta()
         var sections: [ParsedSection] = []
         var current: ParsedSection? = nil
@@ -172,7 +174,7 @@ struct ChordProParser {
                 closeSection()
                 current = ParsedSection(name: name)
                 if !inline.isEmpty {
-                    for ch in inline { current!.chords.append(ch); current!.lyrics.append("") }
+                    for ch in inline { current!.chords.append([ch]); current!.lyrics.append("") }
                     current!.lineGroupSizes.append(inline.count)
                 }
                 continue
@@ -187,8 +189,8 @@ struct ChordProParser {
                 flushChordLine()
                 if current == nil { current = ParsedSection(name: nextAutoName()) }
                 if let pairs = extractParenPairs(line: t), !pairs.isEmpty {
-                    for (ch, lyr) in pairs {
-                        current!.chords.append(ch)
+                    for (chs, lyr) in pairs {
+                        current!.chords.append(chs)
                         current!.lyrics.append(lyr)
                     }
                     current!.lineGroupSizes.append(pairs.count)
@@ -223,7 +225,9 @@ struct ChordProParser {
 
     private struct ParsedSection {
         var name: String
-        var chords: [String] = []
+        // One entry per measure; usually one chord, but bracket-grouped chords
+        // (e.g. "[(A)...(E)...]") share a single measure and appear together here.
+        var chords: [[String]] = []
         var lyrics: [String] = []
         var lineGroupSizes: [Int] = []
         var patternAssignments: [String?] = []  // parallel to chords/lyrics; nil = no assignment
@@ -266,6 +270,98 @@ struct ChordProParser {
         return StrummingPattern(name: name, strokes: strokes)
     }
 
+    // MARK: - Repeated-chord ("Ex2") expansion
+    //
+    // "(Chordx2)" (or x3, x4, ...) means that chord is played N times in a row.
+    // The first play stays where it is (the "xN" is simply dropped); each
+    // remaining play is pushed onto the start of the next body line — unless
+    // that line already opens with its own chord, in which case the extra play
+    // is appended after the end of the current line's lyric instead.
+    private static func expandRepeatedChords(_ lines: [String]) -> [String] {
+        var result = lines
+
+        func isBodyLine(_ s: String) -> Bool {
+            let t = s.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { return false }
+            if t.hasPrefix("{") && t.hasSuffix("}") { return false }
+            if sectionHeader(t) != nil { return false }
+            return true
+        }
+
+        // First body line at or after `start`; nil if a blank line or section
+        // header (i.e. the end of this block) is reached first.
+        func nextBodyLineIndex(from start: Int) -> Int? {
+            var j = start
+            while j < result.count {
+                let t = result[j].trimmingCharacters(in: .whitespaces)
+                if t.isEmpty || sectionHeader(t) != nil { return nil }
+                if t.hasPrefix("{") && t.hasSuffix("}") { j += 1; continue }
+                return j
+            }
+            return nil
+        }
+
+        func startsWithChord(_ s: String) -> Bool {
+            let t = s.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix("("), let closeIdx = t.dropFirst().firstIndex(of: ")") else { return false }
+            let inner = String(t[t.index(after: t.startIndex)..<closeIdx]).trimmingCharacters(in: .whitespaces)
+            return isChordToken(inner) || splitRepeatSuffix(inner) != nil
+        }
+
+        for i in result.indices {
+            guard isBodyLine(result[i]) else { continue }
+            var line = result[i]
+            var extras: [String] = []
+            while let token = firstRepeatToken(in: line) {
+                line.replaceSubrange(token.range, with: "(\(token.chord))")
+                extras.append(contentsOf: Array(repeating: token.chord, count: token.count - 1))
+            }
+            result[i] = line
+            guard !extras.isEmpty else { continue }
+
+            var cursor = i + 1
+            for chord in extras {
+                if let j = nextBodyLineIndex(from: cursor), !startsWithChord(result[j]) {
+                    result[j] = "(\(chord))" + result[j]
+                    cursor = j + 1
+                } else {
+                    result[i] += "(\(chord))"
+                }
+            }
+        }
+        return result
+    }
+
+    // Finds the first "(Chordx2)"-style token in a line: a chord name immediately
+    // followed by x<N>, meaning it should be played N times in a row.
+    private static func firstRepeatToken(in line: String) -> (range: Range<String.Index>, chord: String, count: Int)? {
+        var i = line.startIndex
+        while i < line.endIndex {
+            if line[i] == "(" {
+                let afterOpen = line.index(after: i)
+                if let closeIdx = line[afterOpen...].firstIndex(of: ")") {
+                    let inner = String(line[afterOpen..<closeIdx]).trimmingCharacters(in: .whitespaces)
+                    if let (chord, count) = splitRepeatSuffix(inner) {
+                        return (i..<line.index(after: closeIdx), chord, count)
+                    }
+                    i = line.index(after: closeIdx)
+                    continue
+                } else { break }
+            }
+            i = line.index(after: i)
+        }
+        return nil
+    }
+
+    // "Ex2" -> ("E", 2). The part before the x must itself be a valid chord token.
+    private static func splitRepeatSuffix(_ s: String) -> (chord: String, count: Int)? {
+        guard let xIdx = s.lastIndex(where: { $0 == "x" || $0 == "X" }) else { return nil }
+        let chordPart = String(s[s.startIndex..<xIdx])
+        let countPart = String(s[s.index(after: xIdx)...])
+        guard !chordPart.isEmpty, let count = Int(countPart), count > 1, isChordToken(chordPart) else { return nil }
+        return (chordPart, count)
+    }
+
     // MARK: - Section header detection
 
     // Returns (sectionName, inlineChords) or nil if not a section header.
@@ -305,9 +401,31 @@ struct ChordProParser {
         return false
     }
 
-    // Extract (chord, lyric) pairs from an inline paren-format line.
+    // [ ... ] marks chords that are played within the same measure/strum rather
+    // than each getting its own beat, e.g. "[(A)says this as she (E)takes]".
+    // Returns the bracket ranges (brackets themselves included) found in the line.
+    private static func bracketSpans(in line: String) -> [ClosedRange<String.Index>] {
+        var spans: [ClosedRange<String.Index>] = []
+        var i = line.startIndex
+        while i < line.endIndex {
+            if line[i] == "[" {
+                let afterOpen = line.index(after: i)
+                if let closeIdx = line[afterOpen...].firstIndex(of: "]") {
+                    spans.append(i...closeIdx)
+                    i = line.index(after: closeIdx)
+                    continue
+                }
+            }
+            i = line.index(after: i)
+        }
+        return spans
+    }
+
+    // Extract (chords, lyric) groups from an inline paren-format line.
     // Each chord's lyric runs from after its ) to the opening ( of the next chord.
-    private static func extractParenPairs(line: String) -> [(chord: String, lyric: String)]? {
+    // Chords bracket-grouped with [ ] share one measure: their chords are combined
+    // and their lyric fragments joined into a single aligned block.
+    private static func extractParenPairs(line: String) -> [(chords: [String], lyric: String)]? {
         var positions: [(chord: String, openIdx: String.Index, endIdx: String.Index)] = []
         var i = line.startIndex
         while i < line.endIndex {
@@ -323,12 +441,45 @@ struct ChordProParser {
             } else { i = line.index(after: i) }
         }
         guard !positions.isEmpty else { return nil }
-        return positions.enumerated().map { idx, pos in
-            let lyricStart = pos.endIdx
-            let lyricEnd = idx + 1 < positions.count ? positions[idx + 1].openIdx : line.endIndex
-            let lyric = lyricStart < lyricEnd ? String(line[lyricStart..<lyricEnd]).trimmingCharacters(in: .whitespaces) : ""
-            return (chord: pos.chord, lyric: lyric)
+
+        let spans = bracketSpans(in: line)
+        func spanIndex(for idx: String.Index) -> Int? {
+            spans.firstIndex { $0.contains(idx) }
         }
+
+        // Text following a chord up to the next chord (or line end), with any
+        // stray bracket characters stripped since they're structural, not lyrics.
+        func fragment(after pos: (chord: String, openIdx: String.Index, endIdx: String.Index), upTo nextOpenIdx: String.Index?) -> String {
+            let start = pos.endIdx
+            let end = nextOpenIdx ?? line.endIndex
+            guard start < end else { return "" }
+            return String(line[start..<end])
+                .replacingOccurrences(of: "[", with: "")
+                .replacingOccurrences(of: "]", with: "")
+                .trimmingCharacters(in: .whitespaces)
+        }
+
+        var result: [(chords: [String], lyric: String)] = []
+        var idx = 0
+        while idx < positions.count {
+            let span = spanIndex(for: positions[idx].openIdx)
+            var groupEnd = idx
+            if span != nil {
+                while groupEnd + 1 < positions.count, spanIndex(for: positions[groupEnd + 1].openIdx) == span {
+                    groupEnd += 1
+                }
+            }
+            let group = Array(positions[idx...groupEnd])
+            let fragments = group.enumerated().map { offset, pos -> String in
+                let globalIdx = idx + offset
+                let nextOpenIdx = globalIdx + 1 < positions.count ? positions[globalIdx + 1].openIdx : nil
+                return fragment(after: pos, upTo: nextOpenIdx)
+            }
+            let lyric = fragments.filter { !$0.isEmpty }.joined(separator: " ")
+            result.append((chords: group.map { $0.chord }, lyric: lyric))
+            idx = groupEnd + 1
+        }
+        return result
     }
 
     // MARK: - Chord line detection
@@ -351,7 +502,7 @@ struct ChordProParser {
         let pairs = extractPairs(chordLine: chordLine, lyricLine: lyric)
         guard !pairs.isEmpty else { return }
         for (ch, lyr) in pairs {
-            section!.chords.append(ch)
+            section!.chords.append([ch])
             section!.lyrics.append(lyr)
         }
         section!.lineGroupSizes.append(pairs.count)
@@ -394,8 +545,10 @@ struct ChordProParser {
         var seen = Set<String>()
         var orderedNames: [String] = []
         for s in sections {
-            for ch in s.chords where !seen.contains(ch) {
-                orderedNames.append(ch); seen.insert(ch)
+            for chGroup in s.chords {
+                for ch in chGroup where !seen.contains(ch) {
+                    orderedNames.append(ch); seen.insert(ch)
+                }
             }
         }
 
@@ -406,12 +559,13 @@ struct ChordProParser {
         // Build sections
         let songSections: [SongSection] = sections.map { ps in
             let measures = zip(ps.chords, ps.lyrics).enumerated().map { idx, pair in
-                let (ch, lyr) = pair
+                let (chGroup, lyr) = pair
                 let patternName = idx < ps.patternAssignments.count ? ps.patternAssignments[idx] : nil
                 let patternId = patternName.flatMap { name in
                     meta.strummingPatterns.first { $0.name == name }?.id
                 }
-                return SongMeasure(chordId: defs[ch]?.id, strummingPatternId: patternId, lyric: lyr)
+                let ids = chGroup.compactMap { defs[$0]?.id }
+                return SongMeasure(chordIds: ids, strummingPatternId: patternId, lyric: lyr)
             }
             return SongSection(name: ps.name, measures: Array(measures), lineGroupSizes: ps.lineGroupSizes)
         }

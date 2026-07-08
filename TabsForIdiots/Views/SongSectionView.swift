@@ -200,9 +200,14 @@ struct MeasureCell: View {
 
     // ── Derived strings ──────────────────────────────────────────────────
 
+    // All chords played within this measure, in order. Usually one, but
+    // bracket-grouped chords from the source share a single measure/strum.
+    private var chordNames: [String] {
+        measure.chordIds.compactMap { id in song.chords.first(where: { $0.id == id })?.name }
+    }
+
     private var chordName: String {
-        guard let id = measure.chordId else { return "" }
-        return song.chords.first(where: { $0.id == id })?.name ?? ""
+        chordNames.joined(separator: " → ")
     }
 
     // Lyric words / dashes, with beat markers removed.
