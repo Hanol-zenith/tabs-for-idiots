@@ -31,7 +31,7 @@
 		AABB000000000000000004 /* TabsForIdiots.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TabsForIdiots.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AABB000000000000000005 /* TabsForIdiotsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TabsForIdiotsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AABB000000000000000006 /* TabsForIdiotsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TabsForIdiotsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		AABB300000000000000001 /* Songs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Songs; path = Songs; sourceTree = SOURCE_ROOT; };
+		AABB300000000000000001 /* Songs */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Songs; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -405,14 +405,14 @@
 				DEVELOPMENT_TEAM = L5AYZT7MCP;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-					INFOPLIST_KEY_CFBundleDisplayName = "Tabsy for Ukes";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "TabsForIdiots needs microphone access to detect chords while you play.";
+				INFOPLIST_KEY_CFBundleDisplayName = "Tabsy for Ukes";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tabsy for Ukes needs microphone access to detect chords while you play.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.1.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -436,14 +436,14 @@
 				DEVELOPMENT_TEAM = L5AYZT7MCP;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-					INFOPLIST_KEY_CFBundleDisplayName = "Tabsy for Ukes";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "TabsForIdiots needs microphone access to detect chords while you play.";
+				INFOPLIST_KEY_CFBundleDisplayName = "Tabsy for Ukes";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tabsy for Ukes needs microphone access to detect chords while you play.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.1.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

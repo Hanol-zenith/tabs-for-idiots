@@ -7,11 +7,13 @@ Strumming Patterns:
 Everyman: |D    D U    U D U |
 Bouncer: |D    D U D    D U |
 Passenger: |     U D U    U D U |
-2 Strum: |D    D                 |
+2 Strum: |D    D                |
 
 Intro:
 (C)(F∆7)
+Everyman Everyman
 (C)(F∆7)
+Everyman Everyman
 
 Verse 1:
 (C) I would like to (F∆7) leave this city,
@@ -36,20 +38,14 @@ Everyman Everyman Everyman Everyman
 Everyman Everyman
 (E)You can't give me the dreams that are (Am)mine anyway.
 Everyman Everyman
-(F∆7) I'm half the world away,
-Everyman
-(F∆7) half the world away,
-Passenger
-(Fm) half the world away,
-Everyman
-(Fm) half the world away,
-Passenger
-(C) half the (Am) world away
+(F∆7)Half the world a(F∆7)way, (Fm)half the world a(Fm)way
+Everyman Passenger Everyman Passenger
+(C)Half the world a(Am)way
 Bouncer Everyman
-(D) I've been lost, I've been found
-Everyman
-(F∆7) but I don't (F∆7) feel (F∆7) down. (F∆7)
-Everyman Passenger Everyman 2 Strum
+I've been (D)lost, I've been found but I (F∆7)don't feel down 
+Everyman Everyman 
+ (F∆7) (F∆7) (F∆7)
+Passenger Everyman 2 Strum
 
 Verse 2:
 (C) And when I (F∆7) leave this planet,
@@ -60,9 +56,9 @@ Everyman Everyman
 Bouncer Everyman Everyman Everyman
 (C) And if I could (F∆7) leave this spirit,
 Everyman Everyman
-(C) I'd find me a hole and I'd (F∆7) leave in it,
+I'll (C)find me a hole and (F∆7) I'll leave in it and
 Everyman Everyman
-(C) And I can feel the (Am)warning signs (D)running around my (F∆7)mind.
+(C) I can feel the (Am)warning signs (D)running around my (F∆7)mind.
 Bouncer Everyman Everyman Everyman
 
 Chorus:
@@ -74,25 +70,20 @@ Everyman Everyman Everyman Everyman
 Everyman Everyman
 (E)You can't give me the dreams that are (Am)mine anyway.
 Everyman Everyman
-(F∆7) I'm half the world away,
-Everyman
-(F∆7) half the world away,
-Passenger
-(Fm) half the world away,
-Everyman
-(Fm) half the world away,
-Passenger
-(C) half the (Am) world away
+(F∆7)Half the world a(F∆7)way, (Fm)half the world a(Fm)way
+Everyman Passenger Everyman Passenger
+(C)Half the world a(Am)way
 Bouncer Everyman
-(D) I've been lost, I've been found
-Everyman
-(F∆7) but I don't (F∆7) feel (F∆7) down. (F∆7)
-Everyman Passenger Everyman 2 Strum
+I've been (D)lost, I've been found but I (F∆7)don't feel down 
+Everyman Everyman
+(F∆7) No, I (F∆7)don't feel down (F∆7) No I (F∆7)don't feel down (F∆7) (F∆7) (F∆7)
+Passenger Everyman Passenger Everyman Passenger Everyman 2 Strum
 
-Outro:
-(C)(F∆7)
-(C)(F∆7)
-(C)(F∆7)
-(C)(F∆7)
-
-This arrangement is its contributor's own interpretation, shared for private study, education and non-commercial use. The underlying song, lyrics and music remain the property of their copyright owners.
+Ending:
+(C) (F∆7)
+Everyman Everyman
+Don't feel (C)down (F∆7)
+Everyman Everyman
+I don't feel (C)down (F∆7) (C) (F∆7) (C) (F∆7) (C) (F∆7) (C) (F∆7) (C) (F∆7)
+Everyman Everyman Everyman Everyman Everyman Everyman Everyman Everyman Everyman Everyman Everyman Everyman
+(C)
