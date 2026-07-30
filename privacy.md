@@ -1,7 +1,3 @@
----
-layout: default
-title: Privacy Policy
----
 # Privacy Policy
 
 **Last updated: July 29, 2026**
